@@ -1,0 +1,81 @@
+# Research configuration: best measured geometry (FLAME 2020 + MICA prior + Phase 1 fitter).
+# NOT commercially usable (FLAME 2020, MICA, InsightFace are non-commercial). See DOCS/07.
+flame:
+  model: data/flame_model/generic_model.pkl
+  region_masks: vendor/MICA/data/FLAME2020/FLAME_masks/FLAME_masks.pkl   # official FLAME masks (non-commercial)
+  uv_layout: data/flame_model/head_template.obj            # FLAME texture space via MICA (non-commercial)
+pipeline:
+  input_min_photos: 1
+  input_max_photos: 5
+stage0:
+  detector: insightface
+  min_face_confidence: 0.5
+  default_focal_35mm: 50.0
+  skin_erode_iod: 0.04
+stage1:
+  identity_init: mica
+  flame_version: FLAME2020
+  beta_dims: 300
+  fusion_temperature: 0.05
+  yaw_weight_exponent: 2
+stage1_5:
+  enabled: false
+stage2:
+  fitter: phase1
+  mediapipe_embedding: data/flame_model/mediapipe_embedding.npz
+  phase1:
+    n_shape: 100
+    lambda_shape: 0.0
+    lambda_shape_init: 1.0
+    n_expr: 50
+    lambda_expr: 0.002
+    photometric: false
+  mv_refine:                      # multi-view photo-consistency refinement (src/fitting/mv_refine.py); >= 2 views
+    enabled: true                 # GT scan, commercial path: 1.58-1.60 -> 0.82-0.89 mm mean face error (2-3 views)
+    n_shape: 200
+    iters: 120
+    max_session_minutes: 30       # skipped when EXIF says the photos are from different sittings
+    min_ncc: 0.6                  # reverted when views still disagree (different expressions / sessions)
+  n_expr: 50
+  iters: 400
+  fit_focal: true
+stage3:
+  mode: sculpt
+  detail_level: 75
+  detail_resolution: 4096
+  resolution: 1024
+  max_scale_mm: 1.0
+stage4:
+  enabled: true
+stage5:
+  enabled: true
+  topology: flame
+  export_fbx: true
+stage6:
+  enabled: true
+  texture_resolution: 2048
+  blend_gamma: 2.0
+  min_cos: 0.15
+  depth_tolerance_m: 0.0015
+stage7:
+  enabled: true
+  delight: true
+  delight_strength: 0.5
+  synthesize_skin: true
+  white_balance: false
+stage8:
+  enabled: true
+  roughness_t_zone: 0.33
+  roughness_cheeks: 0.57
+  roughness_lips: 0.22
+  cavity_strength: 0.35
+  sss_ray_count: 32
+  sss_normalize: true
+evaluation:
+  enabled: true
+  judge: insightface
+render:
+  enabled: false
+  samples: 128
+  width: 2048
+  height: 2048

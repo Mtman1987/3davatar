@@ -54,6 +54,14 @@ class IdentityJudge:
         return None if e is None else float(np.dot(ref_emb, e))
 
 
+class EvalFace:
+    """What the evaluation needs per view: a face box and (optionally) the judge's embedding of the photo."""
+
+    def __init__(self, bbox: np.ndarray, embedding: Optional[np.ndarray] = None):
+        self.bbox = np.asarray(bbox, np.float64)
+        self.embedding = embedding
+
+
 def render_turntable(verts_flame, faces, uv, uv_faces, texture, yaws=TURNTABLE_YAWS, size=512, textured=True,
                      sh_lum=None):
     out = []
@@ -108,7 +116,7 @@ def evaluate_run(
         blend = im.copy()
         blend[gm] = (0.45 * im[gm] + 0.55 * geo_img[gm]).astype(np.uint8)
         lm = im.copy()
-        rad = max(2, int(vf.metrics["iod_px"] / 60))
+        rad = max(2, int(vf.metrics.get("iod_px", 300) / 60))
         for p in vf.lmk_target:
             cv2.circle(lm, tuple(int(v) for v in p), rad, (0, 255, 0), -1)
         for p in vf.lmk_pred:
@@ -134,14 +142,15 @@ def evaluate_run(
     cv2.imwrite(str(ev / "turntable.jpg"), np.vstack([np.hstack(tt_tex), np.hstack(tt_geo)]),
                 [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-    if judge is not None:
-        best = max(range(len(detections)), key=lambda k: detections[k].det_score)
-        ref = detections[best].embedding
+    refs = [d.embedding for d in detections if getattr(d, "embedding", None) is not None]
+    if judge is not None and refs:
+        ref = refs[0]
         report.update(judge_turntable(judge, ref, neutral_vertices, faces, uv, uv_faces, albedo))
         if sh_lum is not None:
             report.update(judge_turntable(judge, ref, neutral_vertices, faces, uv, uv_faces, albedo,
                                           sh_lum=sh_lum, prefix="id_relit"))
-    report["lmk_err_iod_mean"] = float(np.mean([v["lmk_err_iod_mean"] for v in report["views"]]))
+    report["lmk_err_iod_mean"] = float(np.mean([v.get("lmk478_err_iod_stable", v.get("lmk_err_iod_mean"))
+                                                for v in report["views"]]))
     if extra:
         report.update(extra)
     with open(out_dir / "report.json", "w") as fh:

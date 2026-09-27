@@ -29,7 +29,11 @@ Most of the "hardcoded" parts you suspected are real problems, but they don't al
 | [03_models_data_training.md](03_models_data_training.md) | Which pretrained models to use, the only 2–3 models worth training (and how, on Kaggle), datasets, licensing, compute, and the full TRELLIS analysis |
 | [04_roadmap.md](04_roadmap.md) | Phase 0 fixes you can do this week (with code), then phases 1–8 with measurable gates and the evaluation protocol |
 | [05_innovation_bets.md](05_innovation_bets.md) | Ideas that could make this better than typical photo-to-avatar tools |
-| [07_commercial_licensing.md](07_commercial_licensing.md) | What is and isn't commercially usable today, commercial-safe datasets, and the switch plan |
+| [07_commercial_licensing.md](07_commercial_licensing.md) | What is and isn't commercially usable today, commercial-safe datasets, the switch plan and its status, and **§7: FLAME 2020 vs 2023 Open results** |
+| [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) | Attribution each shipped asset needs, evaluation-only components, and the open UV-layout licence item |
+
+`DOCS/confidential/` exists only on the author's machine: invention analysis, patent strategy, paper
+plan. It is excluded from git.
 
 ## Key decisions
 
@@ -44,5 +48,14 @@ Most of the "hardcoded" parts you suspected are real problems, but they don't al
 
 ## Status of the code
 
-`src/` is still the v1 pipeline. It is being migrated per `04_roadmap.md`: Phase 0 patches v1 in place, and Phase 1 onward builds the v3 layout from `02 §8`.
+Implemented as of 2026-09-26:
+- Phase 0; Phase 3A and 4A.
+- The Phase 1 fitter (`src/fitting/`) and Phase 1B multi-view photo-consistency refinement.
+- The commercial switch, except the UV layout (C1b) and a self-trained identity prior.
+
+Ground-truth scan with the commercial stack:
+- 1 photo: 1.21 mm mean face error;
+- 3 photos from one sitting: 0.68 mm.
+
+The rest of `src/` is still v1 code being migrated per `04_roadmap.md`.
 `AGENTS.md` points here. The v1-era root documents (GUIDE, roadmap, remember, Research, MEMORY, DATASETS) are in `older/root_docs_v1/`. What was deleted on 2026-09-25, and why, is recorded in `older/REMOVED_WORK_REPORT_2026-09-25.md`.

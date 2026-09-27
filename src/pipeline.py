@@ -58,7 +58,10 @@ class FaceGeoPipeline:
         if not self.model_dir.is_absolute() and not self.model_dir.exists():
             self.model_dir = ROOT / self.model_dir
 
+        cfg_model = (self.cfg.get("flame", {}) or {}).get("model") if isinstance(self.cfg, dict) else None
         flame_candidates = [self.model_dir / "flame" / "generic_model.pkl", self.model_dir / "generic_model.pkl"]
+        if cfg_model:
+            flame_candidates = [Path(cfg_model) if Path(cfg_model).is_absolute() else ROOT / cfg_model]
         if str(model_dir) in ("models_cache", str(ROOT / "models_cache")):
             # the repo default location (written by scripts/extract_flame_from_mica.py); never used
             # when the caller points model_dir somewhere else explicitly
@@ -66,11 +69,26 @@ class FaceGeoPipeline:
         flame_path = next((p for p in flame_candidates if p.exists()), None)
         self.flame = FLAMEModel(str(flame_path)) if flame_path is not None else None
         self.flame_path = flame_path
+        self.flame_is_2020 = flame_path is not None and "2023" not in Path(flame_path).name
+        if self._c("flame").get("uv_layout"):
+            from src.stage3_detail.rasterizer import set_default_uv_layout
+            set_default_uv_layout(self._c("flame")["uv_layout"])
+        if self._c("flame").get("region_masks"):
+            from src.utils.flame_regions import set_default_masks
+            set_default_masks(self._c("flame")["region_masks"])
 
+        self._needs_insightface = self._c("stage0").get("detector", "mediapipe") == "insightface" or \
+            self._c("stage1").get("identity_init", "mean") == "mica" or \
+            self._c("stage2").get("fitter", "phase1") == "landmarks68" or \
+            self._c("evaluation").get("judge", "insightface") == "insightface"
         if detector is not None:
             self.detector = detector
-        else:
+        elif self._needs_insightface:
+            # research-only models (DOCS/07): MICA crops, the 68-landmark fitter, the evaluation judge
             self.detector = FaceDetector(allow_degraded=bool(self.cfg.get("allow_degraded", False)))
+        else:
+            self.detector = None
+        self._mp = None
 
         self._stage1 = None
         self._fitter = None
@@ -107,7 +125,6 @@ class FaceGeoPipeline:
     def uv_regions(self) -> Dict[str, np.ndarray]:
         """UV masks from official FLAME regions + landmark-drawn brows/eyes/lips (flame_regions.py)."""
         if self._uv_regions is None:
-            from src.stage2_expression.landmark_fit import load_landmark_embedding
             from src.utils import flame_regions as fr
             flame = self._require_flame()
             faces = flame.faces.astype(np.int64)
@@ -115,18 +132,25 @@ class FaceGeoPipeline:
             ras = self._get_projector().uv_raster(uv, uvf)
             regions = fr.uv_region_masks(ras, fr.face_region_masks(faces, len(flame.v_template), fr.load_vertex_masks()))
             R = ras.mask.shape[0]
-            regions.update(fr.feature_masks(fr.landmark_uv(load_landmark_embedding(), faces, uv, uvf), R))
+            mp_emb = dict(np.load(ROOT / self._c("stage2").get("mediapipe_embedding",
+                                                            "data/flame_model/mediapipe_embedding_open.npz")))
+            lmk_uv_mp = fr.embedding_uv(mp_emb, faces, uv, uvf)
+            regions.update(fr.feature_masks_mp(lmk_uv_mp, R))
             features = regions["brows"] | regions["eye_openings"] | regions["lip_border"] | regions["lips_landmark"]
             # plain skin for fitting lighting: face without eyes, lips, brows
             regions["plain_skin"] = regions["face"] & ~regions["eye_region"] & ~regions["lips"] & ~features
             # clean skin grain exemplar: forehead + cheeks (no nose: large pores / nostrils)
             # (upper face only: chin/jaw carry stubble and beard shadow on many subjects)
-            lmk = fr.landmark_uv(load_landmark_embedding(), faces, uv, uvf)
-            nose_tip_row = int((1 - lmk[33, 1]) * R)
+            nose_tip_row = int((1 - lmk_uv_mp[1, 1]) * R)            # MediaPipe 1 = nose tip
             upper = np.zeros_like(regions["face"])
             upper[:nose_tip_row] = True
             regions["skin_exemplar"] = regions["plain_skin"] & ~regions["nose"] & upper
             regions["texel_mm"] = fr.texel_scale_mm(ras, flame.v_template, faces, uv, uvf)
+            # Rule 4 collar: every face touching the neck region or the open boundary loop
+            vm = fr.load_vertex_masks()
+            collar_v = np.zeros(len(flame.v_template), bool)
+            collar_v[np.concatenate([vm["neck"], vm["boundary"]])] = True
+            regions["neck_pinning"] = ras.mask & collar_v[faces].any(1)[np.clip(ras.face_id, 0, None)]
             # delighting strength: full on plain skin, half where coarse normals are unreliable
             unreliable = (regions["eye_region"] | regions["lips"] | features).astype(np.float32)
             regions["delight_strength"] = 1.0 - 0.5 * cv2.GaussianBlur(unreliable, (0, 0), 6)
@@ -163,6 +187,12 @@ class FaceGeoPipeline:
                 fit_focal=bool(c.get("fit_focal", True)),
             )
         return self._fitter
+
+    def _get_mp(self):
+        if self._mp is None:
+            from src.stage0_preprocess.landmarks_mp import MediaPipeLandmarker
+            self._mp = MediaPipeLandmarker()
+        return self._mp
 
     def _get_parser(self):
         if self._parser is None:
@@ -222,8 +252,39 @@ class FaceGeoPipeline:
             )
         return self._detail_fusion
 
+    def _mv_refine(self, fit, views, photo_paths, flame, region, c: dict):
+        """
+        Multi-view photo-consistency refinement (src/fitting/mv_refine.py). Only valid for photos of
+        one sitting (same expression, same session): skipped when EXIF says otherwise, and reverted
+        when the refined views still do not agree photometrically.
+        """
+        from src.fitting.mv_refine import MultiViewRefiner, MVRefineConfig
+        from src.stage0_preprocess.camera import same_session
+        ok, why = same_session(photo_paths, float(c.get("max_session_minutes", 30)))
+        if not ok:
+            print(f"[Stage 2] Multi-view refinement skipped: photos are not from one session ({why}).")
+            fit.history["mv_refine"] = f"skipped: {why}"
+            return fit
+        fields = MVRefineConfig.__dataclass_fields__
+        mcfg = MVRefineConfig(**{k: (tuple(v) if isinstance(v, list) else v) for k, v in c.items() if k in fields})
+        print(f"[Stage 2] Multi-view photo-consistency refinement ({len(views)} views, session check: {why})...")
+        refiner = MultiViewRefiner(flame, region, mcfg)
+        ref = refiner.refine(views, fit)
+        ncc = 1.0 - (ref.history.get("mv_ncc") or [1.0])[-1]
+        if ncc < float(c.get("min_ncc", 0.6)):
+            print(f"[Stage 2] Refinement reverted: views agree only at NCC {ncc:.2f} "
+                  f"(< {c.get('min_ncc', 0.6)}); different expressions or sessions?")
+            fit.history["mv_refine"] = f"reverted: ncc {ncc:.3f}"
+            return fit
+        print(f"  views agree at NCC {ncc:.2f} after refinement")
+        ref.history["mv_refine"] = f"ok: ncc {ncc:.3f}"
+        self._mv_ctx = (refiner, views, ref)            # Stage 3 measures mesostructure from the same views
+        return ref
+
     # ------------------------------------------------------------------ run
     def run(self, photo_paths: List[str], output_dir: str) -> Dict[str, Any]:
+        self._mv_ctx = None
+        self._character = False
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         status: Dict[str, Any] = {}
@@ -248,23 +309,44 @@ class FaceGeoPipeline:
             )
 
         # ── Stage 0 ─────────────────────────────────────────────────────────
-        print("[Stage 0] Detection, EXIF intrinsics, parsing...")
-        c0 = self._c("stage0")
+        print("[Stage 0] Detection, landmarks, EXIF intrinsics, parsing...")
+        c0, c1, c2 = self._c("stage0"), self._c("stage1"), self._c("stage2")
         pipe_cfg = self._c("pipeline")
-        val = validate_inputs(
-            photo_paths, detector=self.detector,
-            min_photos=int(pipe_cfg.get("input_min_photos", 1)),
-            min_face_confidence=float(c0.get("min_face_confidence", 0.5)),
-        )
-        if not val.is_valid:
-            raise ValueError(f"Input validation failed: {'; '.join(val.errors)}")
-        pairs = [(p, d) for p, d in zip(photo_paths, val.detections) if d is not None]
-        photos = [cv2.imread(str(p)) for p, _ in pairs]
-        dets = [d for _, d in pairs]
+        if len(photo_paths) < int(pipe_cfg.get("input_min_photos", 1)):
+            raise ValueError(f"Need at least {pipe_cfg.get('input_min_photos', 1)} photo(s).")
+        photos, mps, dets, used, silhouettes = [], [], [], [], []
+        for p in photo_paths:
+            raw = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+            if raw is None:
+                raise ValueError(f"Could not read image {p}.")
+            if raw.dtype != np.uint8:
+                raw = (raw / 257).astype(np.uint8)
+            if raw.ndim == 2:
+                raw = cv2.cvtColor(raw, cv2.COLOR_GRAY2BGR)
+            im = np.ascontiguousarray(raw[..., :3])
+            sil = None
+            if raw.shape[2] == 4 and (raw[..., 3] < 128).mean() > 0.02:
+                # a cut-out (alpha matte): its outline is the head's silhouette, used by the Stage 2 fit
+                sil = raw[..., 3] >= 128
+                print(f"[Stage 0] {Path(p).name}: alpha matte found; its outline constrains skull, ears, jaw and neck.")
+            lm = self._get_mp().detect(im)
+            if lm is None:
+                raise ValueError(f"No face found in {p} (MediaPipe).")
+            if lm.iod < 20:
+                raise ValueError(f"Face in {p} is too small (inter-pupil distance {lm.iod:.0f}px < 20px).")
+            d = self.detector.detect_single(im) if self.detector is not None else None
+            if self._c("stage1").get("identity_init", "mean") == "mica" and d is None:
+                raise ValueError(f"identity_init=mica needs an InsightFace detection; none found in {p}.")
+            photos.append(im)
+            silhouettes.append(sil)
+            mps.append(lm)
+            dets.append(d)
+            used.append(p)
+        pairs = [(p, d) for p, d in zip(used, dets)]
 
         from src.stage0_preprocess.camera import intrinsics_from_exif, intrinsics_from_fov
         intrinsics = []
-        for (p, _), im in zip(pairs, photos):
+        for p, im in zip(used, photos):
             K = intrinsics_from_exif(p, im.shape[:2])
             if K is None:
                 K = intrinsics_from_fov(im.shape[:2], float(c0.get("default_focal_35mm", 50.0)))
@@ -274,31 +356,91 @@ class FaceGeoPipeline:
 
         parser = self._get_parser()
         parsings = [parser.parse(im) for im in photos]
-        erode = [max(1, int(float(c0.get("skin_erode_iod", 0.04)) * _iod(d))) for d in dets]
-        skin_masks = [parser.skin_mask(c, e) for c, e in zip(parsings, erode)]
+        skin_masks = [parser.skin_mask(c, max(1, int(float(c0.get("skin_erode_iod", 0.04)) * lm.iod)))
+                      for c, lm in zip(parsings, mps)]
         # never sample the inside of the mouth (teeth/tongue would be painted onto closed lips)
-        for m, d in zip(skin_masks, dets):
-            if d.landmark_3d_68 is not None and c0.get("exclude_mouth_interior", True):
-                poly = np.zeros(m.shape, np.uint8)
-                cv2.fillPoly(poly, [np.round(d.landmark_3d_68[60:68, :2]).astype(np.int32)], 1)
-                k = max(3, int(0.06 * _iod(d)))
-                m &= ~cv2.dilate(poly, np.ones((k, k), np.uint8)).astype(bool)
-                m &= ~_mouth_interior_pixels(photos[dets.index(d)], d, m)
+        if c0.get("exclude_mouth_interior", True):
+            from src.stage0_preprocess.landmarks_mp import LIPS_INNER, LIPS_OUTER
+            for k, (m, lm) in enumerate(zip(skin_masks, mps)):
+                m &= ~lm.polygon_mask(LIPS_INNER, dilate_px=max(3, int(0.03 * lm.iod)))
+                m &= ~_mouth_interior_pixels(photos[k], lm.points[LIPS_OUTER, :2], lm.iod, m)
 
         # ── Stage 1 ─────────────────────────────────────────────────────────
-        print("[Stage 1] MICA identity (MICA ArcFace features)...")
-        beta = self._get_stage1().encode_multiview(dets)
+        init = c1.get("identity_init", "mean")
+        if init == "mica":
+            if not self.flame_is_2020:
+                raise ValueError("identity_init=mica predicts FLAME 2020 coefficients; the configured model is "
+                                 f"{Path(self.flame_path).name}. Use identity_init: mean (commercial path).")
+            print("[Stage 1] MICA identity prior (research-only licence)...")
+            beta = self._get_stage1().encode_multiview(dets)
+        elif init == "mean":
+            print("[Stage 1] Mean-face start (identity comes from the Stage 2 fit)...")
+            beta = np.zeros(300, np.float32)
+        else:
+            raise ValueError(f"stage1.identity_init must be 'mica' or 'mean', got {init!r}")
 
         # ── Stage 2 ─────────────────────────────────────────────────────────
-        print("[Stage 2] Fitting camera, head pose, expression and jaw per view...")
-        fitter = self._get_fitter()
-        view_fits = [fitter.fit(beta, d.landmark_3d_68, K) for d, K in zip(dets, intrinsics)]
+        fitter_mode = c2.get("fitter", "phase1")
+        if fitter_mode == "phase1":
+            print("[Stage 2] Phase 1 fit: identity, expression, jaw, camera, focal (478 landmarks)...")
+            from src.fitting.fitter import FitConfig, Phase1Fitter, ViewInput
+            from src.utils.flame_regions import load_vertex_masks
+            vm = load_vertex_masks()
+            region = np.setdiff1d(np.unique(np.concatenate([vm["face"], vm["forehead"], vm["nose"], vm["lips"]])),
+                                  np.concatenate([vm["left_eyeball"], vm["right_eyeball"]]))
+            fields = FitConfig.__dataclass_fields__
+            fcfg = FitConfig(**{k: v for k, v in (c2.get("phase1") or {}).items() if k in fields})
+            emb = ROOT / c2.get("mediapipe_embedding", "data/flame_model/mediapipe_embedding_open.npz")
+            cchar = c2.get("character") or {}
+            character = bool(cchar.get("enabled", True)) and any(sil is not None for sil in silhouettes)
+            normals = [None] * len(photos)
+            if character:
+                print("[Stage 2] Character mode (alpha cut-out): outline + whole-head normal sculpt beyond the FLAME prior...")
+                fcfg = FitConfig(**{**{k: getattr(fcfg, k) for k in fields},
+                                    **{k: v for k, v in cchar.items() if k in fields}})
+                if fcfg.w_normal > 0:
+                    from src.stage0_preprocess.normals import FaceNormalEstimator
+                    ne = FaceNormalEstimator(margin=1.05)
+                    for i, (im, sil) in enumerate(zip(photos, silhouettes)):
+                        if sil is not None:
+                            ys, xs = np.nonzero(sil)
+                            normals[i] = ne.predict(im, (xs.min(), ys.min(), xs.max(), ys.max()))
+            else:
+                silhouettes = [None] * len(photos)
+            self._character = character
+            vins = [ViewInput(im, lm, K, skin, normals=n, silhouette=sil)
+                    for im, lm, K, skin, n, sil in zip(photos, mps, intrinsics, skin_masks, normals, silhouettes)]
+            fit = Phase1Fitter(flame, str(emb), fcfg, region).fit(vins, beta_init=beta if init == "mica" else None)
+            cmv = c2.get("mv_refine") or {}
+            if cmv.get("enabled", True) and len(photos) >= 2:
+                fit = self._mv_refine(fit, vins, used, flame, region, cmv)
+            beta = fit.beta.astype(np.float32)
+            view_fits = fit.views
+            vertex_offsets = fit.vertex_offsets
+        elif fitter_mode == "landmarks68":
+            if self.detector is None:
+                raise ValueError("stage2.fitter=landmarks68 needs InsightFace (research-only).")
+            print("[Stage 2] 68-landmark fit (research path)...")
+            fitter = self._get_fitter()
+            view_fits = [fitter.fit(beta, d.landmark_3d_68, K) for d, K in zip(dets, intrinsics)]
+        else:
+            raise ValueError(f"stage2.fitter must be 'phase1' or 'landmarks68', got {fitter_mode!r}")
         for i, vf in enumerate(view_fits):
             m = vf.metrics
-            print(f"  view {i}: landmark error {100 * m['lmk_err_iod_mean']:.1f}% IOD, "
-                  f"f={vf.intrinsics.fx:.0f}px ({vf.intrinsics.source}), distance {m['subject_distance_m']:.2f} m")
+            err = m.get("lmk478_err_iod_stable", m.get("lmk_err_iod_mean"))
+            print(f"  view {i}: landmark error {100 * err:.1f}% IOD, f={vf.intrinsics.fx:.0f}px "
+                  f"({vf.intrinsics.source}), distance {m['subject_distance_m']:.2f} m")
 
         neutral_vertices, _ = flame.decode_neutral(beta)
+        if fitter_mode == "phase1" and vertex_offsets is not None:
+            from src.stage3_detail.rasterizer import compute_vertex_normals as _vn
+            neutral_vertices = neutral_vertices + vertex_offsets[:, None] * _vn(neutral_vertices, faces)
+        # the fitted (expressed) mesh of view 0, FLAME frame: what photo-to-3D services reconstruct
+        _ev = output_dir / "eval"
+        _ev.mkdir(exist_ok=True)
+        with open(_ev / "fitted_expressed_view0.obj", "w") as fh:
+            fh.write("".join(f"v {x:.6f} {y:.6f} {z:.6f}\n" for x, y, z in view_fits[0].vertices_flame))
+            fh.write("".join(f"f {a + 1} {b + 1} {c + 1}\n" for a, b, c in faces))
         uv, uvf = self.uv_layout()
 
         # ── Stage 6 + 7 ─────────────────────────────────────────────────────
@@ -318,19 +460,26 @@ class FaceGeoPipeline:
                                    delight_fit_region=regions["plain_skin"] if delight else None,
                                    delight_strength=(regions["delight_strength"] * float(c7.get("delight_strength", 1.0))
                                                      if delight else None),
-                                   white_balance=bool(c7.get("white_balance", False)))
+                                   white_balance=bool(c7.get("white_balance", False)),
+                                   exclusive_faces=self._ear_faces(faces) if getattr(self, "_character", False) else None)
                 texture_maps.update(proj.save_maps(res, output_dir))
                 source = res.get("albedo_rgb", res["projected_rgb"])
                 print("[Stage 7] Provenance-aware UV fill (observed / mirrored / interpolated)...")
                 from src.stage7_delight.uv_fill import load_or_build_mirror_map
-                mirror = load_or_build_mirror_map(ROOT / "models_cache" / "flame_uv",
+                mirror = load_or_build_mirror_map(ROOT / "models_cache" / "flame_uv" / Path(self.flame_path).stem,
                                                   proj.uv_raster(uv, uvf), flame.v_template, faces)
+                ras = proj.uv_raster(uv, uvf)
                 fr = self._get_filler().fill(
                     source, res["projection_mask"] > 0, res["uv_valid"], mirror,
+                    exemplar_scale=_texel_density_ratio(flame.v_template, faces, uv, uvf, ras,
+                                                        ~(res["projection_mask"] > 0) & res["uv_valid"],
+                                                        regions["skin_exemplar"]),
                     exemplar_region=regions["skin_exemplar"] if c7.get("synthesize_skin", True) else None,
                     mesh={"uv_raster": proj.uv_raster(uv, uvf), "faces": faces, "uv": uv, "uv_faces": uvf,
                           "n_verts": len(flame.v_template)},
-                    closed_regions={"lips": regions["lips"] | regions["lips_landmark"]})
+                    closed_regions={"lips": regions["lips"] | regions["lips_landmark"]},
+                    skin_transfer=bool(c7.get("skin_transfer", True)),
+                    observed_weight=res["weight_map"] if c7.get("grazing_blend", True) else None)
                 fr["sh_coeffs"] = res.get("sh_coeffs")
                 fr["delit"] = "albedo_rgb" in res
                 texture_maps.update(self._get_filler().save_maps(fr, output_dir))
@@ -360,17 +509,30 @@ class FaceGeoPipeline:
         else:
             from src.stage3_detail.sculpt_detail import build_detail
             level = float(c3.get("detail_level", 75))
+            # synthesized pores differ per subject (deterministic for the same photos); a fixed seed
+            # gave every head the identical pore layout
+            import hashlib
+            seed = int(hashlib.sha1(b"".join(Path(p).read_bytes() for p in used)).hexdigest()[:8], 16)
             sculpt = optional("stage3_sculpt", lambda: build_detail(
                 fr["albedo_srgb"], fr["provenance"], self.uv_regions(), level,
-                out_res=int(c3.get("detail_resolution", 4096))))
+                out_res=int(c3.get("detail_resolution", 4096)), seed=seed))
+            if sculpt is not None and self._mv_ctx is not None and c3.get("measured_detail", False):
+                measured = optional("stage3_measured_detail", lambda: self._measured_detail(sculpt, c3))
+                if measured is not None:
+                    sculpt["measured_mm"] = measured
             if sculpt is not None:
                 disp_micro = cv2.resize(sculpt["displacement_mm"], (res3, res3), interpolation=cv2.INTER_AREA)
 
         fusion = self._get_detail_fusion()
+        if sculpt is not None:
+            # measured folds can be deeper than the default ±1 mm encoding: widen it (recorded in the manifest)
+            need = float(np.ceil(np.abs(sculpt["displacement_mm"]).max() * 10) / 10)
+            fusion.max_scale_mm = max(fusion.max_scale_mm, need)
         coupled = fusion.couple_pbr_material_stack(
             meso_disp_mm=zeros,
             micro_disp_mm=disp_micro if disp_micro is not None else zeros,
-            zone_masks=zone_masks or {"valid": np.ones((res3, res3), np.float32)},
+            zone_masks=zone_masks or {"valid": np.ones((res3, res3), np.float32),
+                                      "neck_pinning": self.uv_regions()["neck_pinning"]},
             macro_disp_mm=None,
             weight_meso=float(c3.get("weight_meso", 0.5)),
             weight_micro=weight_micro,
@@ -381,8 +543,10 @@ class FaceGeoPipeline:
         if sculpt is not None:
             sculpt_info = self._save_sculpt(sculpt, fusion.max_scale_mm, saved, neutral_vertices, faces, output_dir, status)
         detail_displacement = coupled["composite_displacement_mm"]
-        collar = detail_displacement[int(0.85 * res3):, :]
-        if float(np.max(np.abs(collar))) > 1e-4:
+        pin = cv2.resize(self.uv_regions()["neck_pinning"].astype(np.uint8), (res3, res3),
+                         interpolation=cv2.INTER_NEAREST) > 0
+        collar = detail_displacement[pin]
+        if collar.size and float(np.max(np.abs(collar))) > 1e-4:
             raise RuntimeError("Rule 4 invariant violated: neck collar displacement is non-zero.")
         for k, v in saved.items():
             detail_maps[k] = str(v)
@@ -446,10 +610,12 @@ class FaceGeoPipeline:
         # ── Evaluation ──────────────────────────────────────────────────────
         if self._c("evaluation").get("enabled", True) and albedo is not None:
             def _eval():
-                from evaluation.phase0_eval import IdentityJudge, evaluate_run
+                from evaluation.phase0_eval import EvalFace, IdentityJudge, evaluate_run
                 judge = IdentityJudge(self.detector.app) if getattr(self.detector, "app", None) is not None else None
+                faces_eval = [EvalFace(lm.bbox, judge.embed(im) if judge is not None else None)
+                              for lm, im in zip(mps, photos)]
                 sh = fr.get("sh_coeffs") if fr is not None else None
-                return evaluate_run(output_dir, photos, dets, view_fits, neutral_vertices, faces, uv, uvf, albedo,
+                return evaluate_run(output_dir, photos, faces_eval, view_fits, neutral_vertices, faces, uv, uvf, albedo,
                                     judge, extra={"texture_fractions": fill_fractions},
                                     sh_lum=sh[0] if sh is not None and len(sh) else None)
             rep = optional("evaluation", _eval)
@@ -459,16 +625,16 @@ class FaceGeoPipeline:
             if self._c("evaluation").get("clay_renders", True) and detail_mesh.exists():
                 def _clay():
                     from scripts.render_clay import render_clay
-                    from src.stage2_expression.landmark_fit import load_landmark_embedding
-                    emb = load_landmark_embedding()
-                    idx = emb["full_lmk_faces_idx"].astype(np.int64).reshape(-1)
-                    lm = (neutral_vertices[faces[idx]] * emb["full_lmk_bary_coords"].reshape(-1, 3)[..., None]).sum(1)
+                    e = np.load(ROOT / self._c("stage2").get("mediapipe_embedding", "data/flame_model/mediapipe_embedding_open.npz"))
+                    lm = (neutral_vertices[faces[e["face_idx"]]] * e["bary"][..., None]).sum(1)
+                    eye_c = lm[[33, 133]].mean(0)                        # MediaPipe eye corners
+                    mouth_c = lm[[13, 14, 61, 291]].mean(0)
                     ev = output_dir / "eval"
                     out = {"clay_front": render_clay(str(detail_mesh), str(ev / "clay_front.png"), 1024, 20)}
                     out["clay_eye"] = render_clay(str(detail_mesh), str(ev / "clay_eye.png"), 1024, 25,
-                                                  tuple(lm[36:42].mean(0)), 0.05)
+                                                  tuple(eye_c), 0.05)
                     out["clay_mouth"] = render_clay(str(detail_mesh), str(ev / "clay_mouth.png"), 1024, 15,
-                                                    tuple(lm[48:68].mean(0) + [0, 0.005, 0]), 0.075)
+                                                    tuple(mouth_c + [0, 0.005, 0]), 0.075)
                     return out
                 clay = optional("evaluation_clay", _clay)
                 if clay:
@@ -503,13 +669,64 @@ class FaceGeoPipeline:
         print(f"[Done] Output at {output_dir}" + (f"  (FAILED stages: {list(failed)})" if failed else ""))
         return output_paths
 
+    def _ear_faces(self, faces: np.ndarray) -> list:
+        """(F,) bool per ear: photo pixels on an ear texture only that ear (projector exclusive_faces)."""
+        from src.utils.flame_regions import load_vertex_masks
+        vm = load_vertex_masks()
+        out = []
+        for k in ("left_ear", "right_ear"):
+            v = np.zeros(int(faces.max()) + 1, bool)
+            v[vm[k]] = True
+            out.append(v[faces].sum(1) >= 2)
+        return out
+
+    def _measured_detail(self, sculpt, c3: dict) -> dict:
+        """
+        Phase 1B detail: a UV displacement map measured by multi-view photo consistency
+        (src/fitting/mv_refine.refine_detail), band-passed to folds and grooves (the refinement's vertex
+        offsets already carry coarse shape) and added to the sculpt displacement. Ground truth: a
+        2.5 mm under-eye groove: see DOCS/04 Phase 1B (measured mesostructure); none from 1 photo.
+        """
+        from src.fitting.mv_refine import DetailRefineConfig, refine_detail
+        from src.stage3_detail.sculpt_detail import normal_map
+        refiner, views, fit = self._mv_ctx
+        uv, uvf = self.uv_layout()
+        print(f"[Stage 3] Measuring folds and grooves from {len(views)} same-session views (multi-view consistency)...")
+        fields = DetailRefineConfig.__dataclass_fields__
+        dcfg = DetailRefineConfig(**{k: (tuple(v) if isinstance(v, list) else v)
+                                     for k, v in (c3.get("measured") or {}).items() if k in fields})
+        D = refine_detail(refiner, views, fit, uv, uvf, dcfg)
+        R = D.shape[0]
+        regions = self.uv_regions()
+        R0 = regions["texel_mm"].shape[0]
+        tmm = cv2.resize(regions["texel_mm"], (R, R), interpolation=cv2.INTER_NEAREST) * (R0 / R)   # mm per D texel
+        m = (D != 0).astype(np.float32)
+        hp_mm = float(c3.get("measured_highpass_mm", 6.0))
+        sig = hp_mm / float(np.median(tmm[(m > 0) & (tmm > 0)]))
+        low = cv2.GaussianBlur(D * m, (0, 0), sig) / np.maximum(cv2.GaussianBlur(m, (0, 0), sig), 1e-3)
+        band = (D - low) * m
+        # keep measured grooves/creases only: the raw map also carries texture-driven blob relief
+        from src.stage3_detail.sculpt_detail import measured_creases
+        band = measured_creases(band, float(np.median(tmm[(m > 0) & (tmm > 0)])))
+        # feather the region edge so no step appears where the measurement stops
+        band *= cv2.GaussianBlur(cv2.erode(m, np.ones((5, 5), np.uint8)), (0, 0), 2.0)
+        out_res = sculpt["displacement_mm"].shape[0]
+        up = cv2.resize(band, (out_res, out_res), interpolation=cv2.INTER_CUBIC)
+        sculpt["displacement_mm"] = (sculpt["displacement_mm"] + up).astype(np.float32)
+        tmm_out = cv2.resize(regions["texel_mm"], (out_res, out_res), interpolation=cv2.INTER_NEAREST) * (R0 / out_res)
+        sculpt["normal_rgb"] = normal_map(sculpt["displacement_mm"], np.where(tmm_out > 0, tmm_out, 1.0))
+        return {"resolution": R, "highpass_mm": hp_mm, "min_mm": float(band.min()), "max_mm": float(band.max()),
+                "rms_mm": float(np.sqrt((band[m > 0] ** 2).mean()))}
+
     def _save_sculpt(self, sculpt, max_scale_mm, saved, neutral_vertices, faces, output_dir, status):
         """Writes 4K displacement/normal maps (replacing the 1K fusion ones) and the sculpt mesh."""
         from src.stage3_detail.sculpt_detail import apply_to_mesh
         from src.utils.flame_regions import load_vertex_masks
         from src.utils.subdivision import export_obj_with_uvs
 
-        disp = sculpt["displacement_mm"]
+        from src.stage3_detail.fusion import _collar_falloff
+        disp = sculpt["displacement_mm"] * _collar_falloff(sculpt["displacement_mm"].shape[0],
+                                                           self.uv_regions()["neck_pinning"])   # Rule 4
         if float(np.abs(disp).max()) > max_scale_mm:
             raise RuntimeError(f"Sculpt displacement exceeds the ±{max_scale_mm} mm encoding range.")
         u16 = np.round(np.clip((disp / max_scale_mm + 1.0) * 0.5, 0, 1) * 65535).astype(np.uint16)
@@ -520,6 +737,9 @@ class FaceGeoPipeline:
                 "micro_gain": st.micro_gain, "map_resolution": int(disp.shape[0]),
                 "meso_source": "photo (delit texture, Hessian crease detection)",
                 "micro_source": "synthesized (pores, micro-grooves, lip striations)"}
+        if sculpt.get("measured_mm"):
+            info["measured_source"] = "multi-view photo consistency (same-session views)"
+            info["measured"] = sculpt["measured_mm"]
 
         def _mesh():
             uv, uvf = self.uv_layout()
@@ -617,6 +837,20 @@ class FaceGeoPipeline:
             return None
 
 
+def _texel_density_ratio(verts, faces, uv, uvf, ras, target, source) -> float:
+    """Median texels-per-mm of the `target` UV area divided by that of the `source` area."""
+    t3 = verts[faces]
+    a3 = 0.5 * np.linalg.norm(np.cross(t3[:, 1] - t3[:, 0], t3[:, 2] - t3[:, 0]), axis=1)
+    t2 = uv[uvf]
+    a2 = 0.5 * np.abs(np.cross(t2[:, 1] - t2[:, 0], t2[:, 2] - t2[:, 0]))
+    dens = np.sqrt(a2 / np.maximum(a3, 1e-12))
+    fid = ras.face_id
+    dt, ds = fid[target & (fid >= 0)], fid[source & (fid >= 0)]
+    if not len(dt) or not len(ds):
+        return 1.0
+    return float(np.median(dens[dt]) / np.median(dens[ds]))
+
+
 def _iod(det) -> float:
     lm = det.landmark_3d_68
     if lm is None:
@@ -624,25 +858,22 @@ def _iod(det) -> float:
     return float(np.linalg.norm(lm[36:42, :2].mean(0) - lm[42:48, :2].mean(0)))
 
 
-def _mouth_interior_pixels(photo: np.ndarray, det, skin: np.ndarray) -> np.ndarray:
+def _mouth_interior_pixels(photo: np.ndarray, outer_lip_px: np.ndarray, iod: float, skin: np.ndarray) -> np.ndarray:
     """
     Teeth and mouth-cavity pixels inside the (dilated) outer lip contour: much less chromatic
-    than skin (teeth) or much darker (cavity). Complements the inner-lip landmark polygon,
-    which misses teeth on wide smiles.
+    than skin (teeth) or much darker (cavity). Complements the inner-lip polygon, which misses
+    teeth on wide smiles.
     """
-    lm = det.landmark_3d_68[:, :2]
     outer = np.zeros(photo.shape[:2], np.uint8)
-    cv2.fillPoly(outer, [np.round(lm[48:60]).astype(np.int32)], 1)
-    outer = cv2.dilate(outer, np.ones((max(3, int(0.05 * _iod(det))),) * 2, np.uint8)).astype(bool)
+    cv2.fillPoly(outer, [np.round(outer_lip_px).astype(np.int32)], 1)
+    outer = cv2.dilate(outer, np.ones((max(3, int(0.05 * iod)),) * 2, np.uint8)).astype(bool)
     lab = cv2.cvtColor(photo, cv2.COLOR_BGR2LAB).astype(np.float32)
     chroma = np.hypot(lab[..., 1] - 128, lab[..., 2] - 128)
     ref = skin & ~outer
     if ref.sum() < 100:
         return np.zeros_like(outer)
     c_ref, l_ref = np.median(chroma[ref]), np.median(lab[..., 0][ref])
-    teeth = chroma < 0.45 * c_ref
-    cavity = lab[..., 0] < 0.45 * l_ref
-    bad = outer & (teeth | cavity)
+    bad = outer & ((chroma < 0.45 * c_ref) | (lab[..., 0] < 0.45 * l_ref))
     return cv2.dilate(bad.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
 
 

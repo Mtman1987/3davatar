@@ -19,6 +19,25 @@ import numpy as np
 
 
 
+def _collar_falloff(h: int, neck_pinning: Optional[np.ndarray]) -> np.ndarray:
+    """
+    Rule 4 multiplier (h, h): exactly 0 on the neck collar, smooth rise to 1 just outside it.
+    `neck_pinning` is the collar's UV mask (any layout). Without one, the legacy assumption of
+    the MICA-distributed FLAME layout is used: the collar is the bottom 15 % of UV rows.
+    """
+    if neck_pinning is None:
+        rows = np.arange(h, dtype=np.float32)[:, None]
+        t = np.clip((int(0.85 * h) - rows) / float(max(int(0.85 * h) - int(0.70 * h), 1)), 0.0, 1.0)
+        f = np.broadcast_to(t * t * (3.0 - 2.0 * t), (h, h)).copy()
+        f[int(0.85 * h):, :] = 0.0
+        return f
+    pin = cv2.resize(np.asarray(neck_pinning, np.float32), (h, h), interpolation=cv2.INTER_NEAREST) > 0.5
+    soft = cv2.GaussianBlur(pin.astype(np.float32), (0, 0), max(1.0, h / 256))
+    f = 1.0 - np.clip(2.0 * soft, 0.0, 1.0)
+    f[pin] = 0.0
+    return f
+
+
 class MultiTierDetailFusion:
     """
     Composites multi-tier facial geometry and couples PBR material properties.
@@ -57,6 +76,7 @@ class MultiTierDetailFusion:
         weight_meso: float = 0.5,
         weight_micro: float = 0.35,
         mask: Optional[np.ndarray] = None,
+        neck_pinning: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
         Composites multi-tier displacements into a unified metric heightfield:
@@ -94,15 +114,7 @@ class MultiTierDetailFusion:
             m = _match_res(mask)
             total = total * (m > 0.1).astype(np.float32)
 
-        # Enforce Rule 4 Neck Seam Contract Invariant (smooth Hermite taper + bitwise boundary pinning)
-        transition_start = int(0.70 * h)
-        bottom_start = int(0.85 * h)
-        ramp_len = max(bottom_start - transition_start, 1)
-        row_indices = np.arange(h, dtype=np.float32)[:, None]
-        t = np.clip((bottom_start - row_indices) / float(ramp_len), 0.0, 1.0)
-        smooth_falloff = t * t * (3.0 - 2.0 * t)
-        total = total * smooth_falloff
-        total[bottom_start:, :] = 0.0
+        total = total * _collar_falloff(h, neck_pinning)
 
         # Clip strictly to metric bounds
         total = np.clip(total, -self.max_scale_mm, self.max_scale_mm)
@@ -288,30 +300,21 @@ class MultiTierDetailFusion:
             'coat_roughness'           : (H, W) float32 sebum oil coat sheen roughness
         """
         valid = zone_masks.get('valid')
+        neck_pinning = zone_masks.get('neck_pinning', zone_masks.get('neck_collar'))
 
         # 1. Composite displacement
         comp_disp = self.fuse_displacements(
             meso_disp_mm=meso_disp_mm,
             micro_disp_mm=micro_disp_mm,
             macro_disp_mm=macro_disp_mm,
+            neck_pinning=neck_pinning,
             weight_macro=weight_macro,
             weight_meso=weight_meso,
             weight_micro=weight_micro,
             mask=valid,
         )
-        # Enforce Rule 4 Neck Seam Contract Invariant (smooth Hermite taper + bitwise boundary pinning)
-        transition_start = int(0.70 * self.resolution)
-        bottom_start = int(0.85 * self.resolution)
-        ramp_len = max(bottom_start - transition_start, 1)
-        row_indices = np.arange(self.resolution, dtype=np.float32)[:, None]
-        t = np.clip((bottom_start - row_indices) / float(ramp_len), 0.0, 1.0)
-        smooth_falloff = t * t * (3.0 - 2.0 * t)
-        comp_disp = comp_disp * smooth_falloff
-
-        neck_pinning = zone_masks.get('neck_pinning', zone_masks.get('neck_collar'))
-        if neck_pinning is not None:
-            comp_disp = comp_disp * (1.0 - np.clip(neck_pinning, 0.0, 1.0))
-        comp_disp[bottom_start:, :] = 0.0
+        # Rule 4 Neck Seam Contract: zero inside the pinned collar, smooth taper just outside it
+        comp_disp = comp_disp * _collar_falloff(comp_disp.shape[0], neck_pinning)
 
         # 2. Tangent normal map
         normals_rgb = self.compute_tangent_normal_map(comp_disp)

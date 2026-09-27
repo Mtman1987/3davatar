@@ -51,6 +51,7 @@ def quilt(
     n_pool: int = 4000,
     n_try: int = 40,
     seed: int = 0,
+    calm_fraction: float = 1.0,
 ) -> np.ndarray:
     """
     Fills `target` (R,R bool) with a quilt of patches taken from `exemplar` where `source` is
@@ -67,6 +68,10 @@ def quilt(
     if len(cand) == 0:
         raise ValueError("No clean skin area large enough to take texture patches from.")
     pool = np.stack([exemplar[y:y + patch, x:x + patch] for y, x in cand]).astype(np.float32)
+    if calm_fraction < 1.0 and len(pool) > 50:
+        # keep the calmest patches: wrinkles, furrows and specular streaks make the most structured ones
+        energy = pool.reshape(len(pool), -1).std(1)
+        pool = pool[energy <= np.quantile(energy, calm_fraction)]
 
     step = patch - overlap
     win1 = np.minimum(np.arange(patch) + 1, np.arange(patch)[::-1] + 1).astype(np.float32)
@@ -109,16 +114,26 @@ def synthesize_skin_detail(
     patch: int = 48,
     seed: int = 0,
     gain: Optional[float] = 1.0,
+    exemplar_scale: float = 1.0,
+    calm_fraction: float = 1.0,
 ) -> np.ndarray:
     """
     Returns the synthesized high-frequency layer (R,R,3) for `target`. The exemplar is the
     high-pass of `texture` over clean observed skin (`observed & source_region`), shrunk so
-    patches never straddle a mask border.
+    patches never straddle a mask border. `exemplar_scale` resamples the exemplar by the ratio of
+    target to exemplar texel density.
     """
     src = observed & source_region
     src = cv2.erode(src.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     if src.sum() < patch * patch * 4:
         raise ValueError("Too little observed clean skin to build a texture exemplar.")
     hp = high_pass(texture, observed, sigma_px)
-    synth = quilt(hp, src, target, patch=patch, overlap=max(4, patch // 4), seed=seed)
+    if abs(exemplar_scale - 1.0) > 0.05:
+        # target texels cover more (or less) skin than exemplar texels: resample the exemplar so
+        # pores and grain keep their size in mm
+        size = (max(8, int(round(hp.shape[1] * exemplar_scale))), max(8, int(round(hp.shape[0] * exemplar_scale))))
+        hp = cv2.resize(hp, size, interpolation=cv2.INTER_AREA if exemplar_scale < 1 else cv2.INTER_CUBIC)
+        src = cv2.resize(src.astype(np.uint8), size, interpolation=cv2.INTER_NEAREST).astype(bool)
+        patch = max(12, int(round(patch * min(1.0, exemplar_scale * 2))))
+    synth = quilt(hp, src, target, patch=patch, overlap=max(4, patch // 4), seed=seed, calm_fraction=calm_fraction)
     return synth * float(gain)

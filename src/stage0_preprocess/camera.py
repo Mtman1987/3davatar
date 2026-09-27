@@ -63,7 +63,32 @@ def read_exif_focal(path: Union[str, Path]) -> dict:
         "focal_plane_unit": sub.get(0xA210),
         "pixel_x_dimension": sub.get(0xA002),
         "camera_model": exif.get(0x0110) if exif else None,
+        "datetime_original": sub.get(0x9003) or (exif.get(0x0132) if exif else None),
     }
+
+
+def same_session(paths, max_minutes: float = 30.0) -> Tuple[bool, str]:
+    """
+    Were these photos taken in one sitting (same camera, capture times within `max_minutes`)?
+    Unknown (missing EXIF) counts as yes; the caller should still check photo-consistency.
+    """
+    from datetime import datetime
+
+    info = [read_exif_focal(p) for p in paths]
+    models = {i["camera_model"] for i in info if i["camera_model"]}
+    if len(models) > 1:
+        return False, f"different cameras: {sorted(models)}"
+    times = []
+    for i in info:
+        try:
+            times.append(datetime.strptime(str(i["datetime_original"]).strip(), "%Y:%m:%d %H:%M:%S"))
+        except (TypeError, ValueError):
+            pass
+    if len(times) >= 2:
+        span = (max(times) - min(times)).total_seconds() / 60.0
+        if span > max_minutes:
+            return False, f"capture times span {span:.0f} min"
+    return True, "ok" if len(times) >= 2 else "no EXIF capture times"
 
 
 def intrinsics_from_exif(path: Union[str, Path], image_hw: Tuple[int, int]) -> Optional[Intrinsics]:

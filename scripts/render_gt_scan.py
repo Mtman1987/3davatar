@@ -40,6 +40,12 @@ if a["disp"] and a["disp_strength"] > 0:
     tex = bpy.data.textures.new("disp", "IMAGE"); tex.image = img
     d = obj.modifiers.new("disp", "DISPLACE"); d.texture = tex; d.texture_coords = "UV"
     d.strength = a["disp_strength"]; d.mid_level = a["disp_mid"]
+if a.get("extra_disp"):
+    # a known relief edit on top of the scan's own (e.g. a groove): value 1 = unchanged, 0 = full depth
+    img2 = bpy.data.images.load(a["extra_disp"]); img2.colorspace_settings.name = "Non-Color"
+    tex2 = bpy.data.textures.new("disp2", "IMAGE"); tex2.image = img2
+    d2 = obj.modifiers.new("disp2", "DISPLACE"); d2.texture = tex2; d2.texture_coords = "UV"
+    d2.strength = a["extra_disp_strength"]; d2.mid_level = 1.0
 
 mat = bpy.data.materials.new("skin"); mat.use_nodes = True
 nt = mat.node_tree; nodes, links = nt.nodes, nt.links
@@ -125,6 +131,10 @@ def main():
     ap.add_argument("--key-el", type=float, default=30.0)
     ap.add_argument("--disp-strength", type=float, default=0.06)
     ap.add_argument("--albedo", default=None, help="override albedo texture (e.g. with added pigment)")
+    ap.add_argument("--extra-disp", default=None, help="16-bit relief-edit map (1 = unchanged, 0 = full depth), "
+                    "e.g. from scripts/make_groove_scan.py")
+    ap.add_argument("--extra-disp-mm", type=float, default=0.0, help="full depth of --extra-disp in mm")
+    ap.add_argument("--subdiv", type=int, default=2)
     a = ap.parse_args()
     scan = Path(a.scan)
     out = Path(a.out).resolve()
@@ -134,7 +144,8 @@ def main():
     args = {
         "mesh": str(scan / "LeePerrySmith.glb"), "albedo": a.albedo or str(scan / "Map-COL_blender.png"),
         "disp": str(scan / "Disp_blender.png"), "disp_strength": a.disp_strength,
-        "disp_mid": 0.62, "subdiv": 2, "sss": a.sss, "sss_radius_rgb": [1.0, 0.35, 0.2], "sss_scale": a.sss_scale,
+        "disp_mid": 0.62, "subdiv": a.subdiv, "sss": a.sss,
+        "extra_disp": a.extra_disp, "extra_disp_strength": a.extra_disp_mm / 1000.0 * 19.17, "sss_radius_rgb": [1.0, 0.35, 0.2], "sss_scale": a.sss_scale,
         "samples": a.samples, "res": a.res, "ambient": 0.35, "target": target,
         "lights": [["key", 2500.0, a.key_az, a.key_el, 12.0, 4.0], ["fill", 700.0, 50.0, 10.0, 12.0, 6.0],
                    ["rim", 900.0, 160.0, 35.0, 12.0, 3.0]],

@@ -125,6 +125,177 @@ This assumes `FocalPlaneResolutionUnit == 2` (inches). If the image was resized 
 - Identity score (held-out judge) improves over Phase 0 on ≥ 90 % of subjects.
 - On NoW (or REALY), fitted geometry is no worse than MICA alone.
 
+### ✅ Status (2026-09-26): fitter implemented (`src/fitting/fitter.py`)
+- 478 MediaPipe landmarks through the clean-room embedding.
+- Fits EXIF focal (trusted: a free focal drifted 13–26% by trading focal against depth), β, ψ, jaw and pose.
+- Optional photometric SH stage. It gave no gain on ground truth, so it is off.
+- Landmark error 2.1–3.1 % IOD on the golden set.
+- Ground-truth scan, single photo: 1.205 / 0.659 mm mean / median, the best of all our single-photo
+  paths including the non-commercial MICA one (1.342 mm).
+- Not done: Pixel3DMM dense UV / normals (non-commercial weights; needs a self-trained replacement),
+  subdivision-2 Δ residual, NoW / REALY evaluation.
+
+## Phase 1B — Multi-view photo-consistency refinement ✅ implemented 2026-09-26
+
+`src/fitting/mv_refine.py`, config `stage2.mv_refine`.
+
+**Why.** Detector landmarks drift across views: the same index lands on different skin. Joint
+multi-view *landmark* fitting therefore does not help (1.567 → 1.597 mm).
+
+**How.** Starting from the Phase 1 fit, the refiner jointly optimises shared β, per-vertex normal
+offsets and relative poses so that every visible surface point matches across views:
+- NCC on model-tied surface samples;
+- coarse to fine;
+- z-buffer visibility.
+
+**Guards.**
+- EXIF same-session check (camera model, capture times within 30 min).
+- The fit reverts if views still disagree (NCC < 0.6).
+
+**Result.** Ground-truth scan, 3 photos (front, ±25°): **0.680 / 0.496 mm**, versus 1.339 / 0.713 mm
+for landmarks alone. About 90 s on a CPU.
+
+**Next:**
+- validate on real same-session captures (none exist yet);
+- a silhouette term for profile views;
+- per-view expression inside the refinement;
+- ~~full-resolution levels for measured mesostructure~~ (done, below).
+
+**Measured mesostructure: built, off by default (2026-09-26).**
+`refine_detail` solves a UV displacement map (64 → 512, NCC across views) on top of the refined fit.
+Stage 3 can band-pass it (6 mm), keep only elongated valleys (`measured_creases`) and add it to the sculpt
+displacement (`stage3.measured_detail`, ≥ 2 same-session views).
+
+Ground truth: a 2.5 mm deep, σ 2 mm tear-trough groove cut into the scan (`scripts/make_groove_scan.py`),
+3 views, groove run minus plain control. The table uses the exported displacement map sampled on the
+centreline. That sampling is now in `scripts/eval_groove.py`; the vertex-snapping mesh rows under-read
+narrow grooves.
+
+| Variant | Groove recovered | False relief elsewhere |
+|---|---|---|
+| Before (no measured detail) | 0.04–0.22 mm | none |
+| Raw measured map | **2.07 mm** | honeycomb ±0.7 mm over the whole face (skin texture read as relief), clearly visible in clay |
+| + elongated-valley filter | 0.73 mm | 0.17 mm RMS, but visible short false creases everywhere |
+
+Verdict: the multi-view signal is real, and the raw map sees 80 % of the groove. The texture-driven false
+relief is not solved, so the feature is off by default.
+
+Next ideas:
+- regularise D with a crease prior learned from scans, rather than a hand filter;
+- use the two-sided (both views) consistency residual as a per-texel confidence;
+- test on a real same-session capture.
+
+## Phase 1C — Single-photo identity: what does and does not work (2026-09-26)
+
+**The complaint, measured.** Golden-set heads differ from each other by 2.0 mm RMS over the face
+(rigid-aligned). FLAME's own population differs by 4.8 mm. From one photo, the fit stays near the mean face.
+
+**The render → compare → correct loop already exists.** It is the Phase 1 fitter: camera distance
+(EXIF focal), pose, expression and shape are optimised so the render matches the photo. The multi-view
+refiner runs the same loop across photos.
+
+**Why "loss → 0" is not the goal.** A render textured with the same photo matches that photo for *any*
+shape, so the only comparisons that constrain geometry are ones the texture cannot fake: landmarks,
+outlines, shading/normals, and other views.
+
+Single-photo experiments on the ground-truth scan (mean face error, 3–5 views each run as a single photo):
+
+| Change | Result |
+|---|---|
+| Weaker shape prior (λ 5e-5 → 1e-5 → 2e-6) | Landmark loss drops and \|β\| grows 5 → 14 (more "distinct"), but error goes **up** 1.25 → 1.33 → 1.43 mm: overfitting |
+| DAViD predicted normals as a render-and-compare loss (`FitConfig.w_normal`) | **Worse**: 1.21 → 1.26 → 1.32 mm. DAViD normals are 10–12° off the true scan normals and bias toward the camera at yaw. Kept, default 0 |
+| Face-outline (silhouette) check | The fitted jaw and chin already follow the photo outline; no loss term added |
+| DAViD normals → integrated relief (normal residual, Frankot-Chellappa, high-pass) | About 0.3 mm of the 2.5 mm groove; 0.6 mm noise |
+
+**What will work:**
+1. **More than one photo of one sitting.** This is proven: 1.21 → 0.68 mm shape, and folds are measured.
+   Guided capture (bet #8 in `05`) is the product answer.
+2. **A dense-landmark network trained on synthetic renders.** Wood et al., ECCV 2022 ("3D face
+   reconstruction with dense landmarks") fit a morphable model to 703 predicted landmarks trained only on
+   synthetic data, and were state of the art on NoW. Renders of FLAME 2023 Open with our own textures
+   are commercially clean training data. This is the C5 identity prior, and it plugs straight into the
+   Phase 1 fitter's landmark loss.
+3. **An identity loss.** This needs a commercially licensed recogniser. OpenCV Zoo's SFace weights are
+   Apache-2.0, but their training data is undocumented; legal review first.
+
+## Phase 1D — Character mode for CG cut-outs ✅ 2026-09-27
+
+Triggered automatically when an input has an alpha matte, i.e. a cut-out, usually a game or film
+character render (`stage2.character`).
+
+**Problem.** `data/real/Hero.png` is a very muscular CG hero. Tripo and Meshy reconstruct it closely; we
+produced a puffy, average-looking head. Nothing constrained the skull, ears, jaw or neck, and FLAME's
+prior pulled the shape toward an average human.
+
+**What character mode does:**
+1. **Outline render-and-compare.** The model's occluding contour is matched two-sided to the alpha
+   outline (`FitConfig.w_silhouette`): skull, ears, jaw and neck sides. Perspective follows; the lens
+   estimate went ×1.23 → ×1.7.
+2. **Normal sculpt.** Free-form offsets along the normals are carved until the rendered normals match
+   DAViD's predicted normals over the whole head (`w_normal 3`, `normal_region: head`,
+   `lambda_offset_lap 0.02`). On clean CG renders DAViD's normals read like a clay sculpt of the
+   character. On real photos they were 10–12° off, which is why this stays off for ordinary photos.
+3. **Pinned offsets.** No offsets on the eyeballs, neck seam (Rule 4) or lips (they open the neutral mouth);
+   ears get 30 %.
+4. **Ear texture.** Photo pixels on the model's ears texture only the ears, so no ghost ear on the cheek.
+   Character mode only: on the golden set this cost −0.03 identity on every subject.
+
+**Result on `Hero.png`.** Identity (held-out judge) at 0° / +30° / −30°:
+
+| Run | 0° | +30° | −30° |
+|---|---|---|---|
+| Before | 0.685 | 0.645 | 0.681 |
+| Character mode | **0.766** | **0.673** | **0.701** |
+
+Visually, the puffy cheeks, round jaw and thin neck become a lean, squared jaw, cheek planes, a heavy
+brow and a thick neck.
+
+**Ordinary photos are unchanged.** Golden Obama scores are identical.
+
+**Limits:**
+- Profile depth is only as good as the normals from one frontal view; a side render of the character
+  would constrain it.
+- FLAME's 5k vertices cap the sharpness of carved planes. Finer relief (neck cords, creases) should come
+  from DAViD normals as a displacement map (next step).
+
+## Phase 3A+ — skin transfer and grazing blend ✅ 2026-09-27
+
+Requested after the hero test. The side and back of the head were a flat, distinguishable colour, and a
+dark line ran under the jaw.
+
+**Skin transfer** (`stage7.skin_transfer`). Unseen skin is now quilted from full-detail patches (≈1 mm band,
+56 px) of the subject's clean forehead and cheek skin.
+- Only the calmest 50 % of candidate patches are used, which drops wrinkles, furrows and shine.
+- The patches sit on the tone of the observed skin bordering the gap, not an edge-interpolated colour
+  that drifts toward neck and ear tones.
+
+**Grazing blend** (`stage7.grazing_blend`). Texels the photo sees only edge-on (beyond about 70°) fade
+into the filled skin. They carried the jaw's cast shadow onto the under-jaw and neck.
+
+**Results:**
+- Hero identity is unchanged (0.765 / 0.672 / 0.702).
+- Golden spot-check (Obama, Elon, Moghbeli), mean change: frontal +0.007, +30° +0.008, −30° −0.003.
+- Colour casts in the photo (Elon's magenta light) carry into the transferred skin; cast removal is
+  still Phase 3B.
+
+## Phase C1b — own UV layout ✅ 2026-09-26
+
+`scripts/build_clean_uv.py` → `data/flame_model/uv_layout_open.npz` (config `flame.uv_layout`). The
+build uses only FLAME 2023 Open geometry and our clean-room masks.
+- Islands: face, head halves, ears, eyeballs.
+- Flattening: LSCM; packing: raster packer with rotations.
+- Face: 10.7 texels/mm at 4K (old layout 12.2), with lower area distortion (p90/p10 2.2 vs 3.4).
+
+Golden set (`outputs/golden_commercial_v4` vs `v3`), mean identity: frontal 0.725 → 0.721, +30°
+0.623 → 0.617, −30° 0.672 → 0.669. No subject drops more than 0.024. This counts as within noise; the
+layout is now the default.
+
+The switch exposed layout assumptions, now fixed:
+- a mirror-map cache keyed only by resolution;
+- skin grain quilted in texels (now scaled by the texel-density ratio);
+- "bottom 15 % of UV rows = neck" in `fusion.py` and `sculpt_detail.py` (now the `neck_pinning` UV mask
+  built from the neck and boundary vertices).
+
 ---
 
 ## Phase 2 — Production template and real rig (1–2 weeks) → L2 complete
@@ -229,6 +400,17 @@ Requested 2026-09-25: the mesh itself (not only the painted texture) should carr
 ## Phase C — Commercial switch (parallel track, see `07_commercial_licensing.md §6`)
 
 C1 FLAME 2023 Open (CC-BY-4.0) · C2 MediaPipe replaces InsightFace detection/landmarks · C3 MICA removed, β from the Phase 1 fitter · C4 licensed evaluation judge · C5 commercial training corpus. Gates in `07 §6`.
+
+Status 2026-09-26:
+- ✅ C1 model.
+- ✅ C1a clean-room masks + embedding (`scripts/build_clean_assets.py`), which are also more accurate.
+- ⏳ **C1b UV layout**: MPI permission or our own layout; blocks selling textured assets.
+- ✅ C2.
+- ✅ C3, with the single-photo identity gap about 0.02–0.03. Close it with a self-trained identity
+  prior (C5) and multi-photo capture (Phase 1B).
+- ⏳ C4, C5.
+
+Results: `07 §7`.
 
 ## Phase 5 — Hair and grooming (2–4 weeks)
 

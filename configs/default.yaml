@@ -2,18 +2,25 @@
 # Face Geometry Pipeline — Phase 0 configuration (DOCS/04_roadmap.md)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+flame:
+  # FLAME 2023 Open (CC-BY-4.0, commercial use; attribution + paper citation required).
+  # FLAME 2020 (non-commercial) is used by configs/research.yaml.
+  model: data/flame_model/flame2023_open.pkl
+  region_masks: data/flame_model/region_masks_open.npz    # clean-room masks (scripts/build_clean_assets.py)
+  uv_layout: data/flame_model/uv_layout_open.npz          # clean-room UV layout (scripts/build_clean_uv.py, C1b)
+
 pipeline:
   input_min_photos: 1             # 1 portrait works; 3–5 views improve coverage
   input_max_photos: 5
 
 stage0:
-  detector: insightface           # detection + 68 landmarks (buffalo_l)
+  detector: mediapipe             # MediaPipe 478 landmarks (Apache-2.0); 'insightface' = research-only
   min_face_confidence: 0.5
   default_focal_35mm: 50.0        # focal prior only when the photo has no EXIF focal length
   skin_erode_iod: 0.04            # erode the parsed skin mask by 4% of inter-ocular distance
 
 stage1:
-  model: mica                     # β from MICA using MICA's own ArcFace (Phase 0 fix R1)
+  identity_init: mean             # 'mean' (commercial) | 'mica' (FLAME 2020 + research licence only)
   flame_version: FLAME2020
   beta_dims: 300
   fusion_temperature: 0.05
@@ -22,10 +29,39 @@ stage1:
 stage1_5:
   enabled: false                  # v1 contour deformer: disabled (DOCS/01 R3); returns as Δ in Phase 1
 
-stage2:                           # replaces dead SMIRK wrapper + 5-point PnP (R2)
-  n_expr: 50                      # FLAME expression components fitted per view
+stage2:
+  fitter: phase1                  # Phase 1 fitter (478 landmarks, focal, β, ψ, jaw); 'landmarks68' = old research path
+  mediapipe_embedding: data/flame_model/mediapipe_embedding_open.npz   # clean-room MediaPipe->FLAME 2023 Open map (scripts/build_clean_assets.py)
+  phase1:                         # tuned on the ground-truth scan renders (evaluation/gt_scan_eval.py; 1 subject)
+    n_shape: 200
+    lambda_shape: 5.0e-5
+    n_expr: 50
+    lambda_expr: 2.0e-4
+    photometric: false            # measured: no gain on ground truth; enable for experiments
+    w_normal: 0.0                 # DAViD normal render-and-compare (src/stage0_preprocess/normals.py). Measured on
+                                  # 3 GT views: 0 -> 1.21 mm, 0.1 -> 1.26, 0.3 -> 1.32 (DAViD normals ~10 deg off); keep 0
+  # Character mode: automatic when a photo has an alpha matte (a cut-out, typically a CG character render).
+  # Outline render-and-compare (skull, ears, jaw, neck) + a sculpt stage that carves free-form offsets
+  # until the rendered normals match DAViD's predicted normals over the whole head. Lifts the fit out of
+  # FLAME's average-human prior (data/real/Hero.png: puffy average face -> lean, chiselled hero).
+  character:
+    enabled: true
+    w_silhouette: 1.0
+    offsets: true
+    w_normal: 3.0
+    normal_region: head
+    lambda_offset_lap: 0.02
+    lambda_offset_mag: 1.0e-5
+    iters_normal: 500
+  mv_refine:                      # multi-view photo-consistency refinement (src/fitting/mv_refine.py); >= 2 views
+    enabled: true                 # GT scan, commercial path: 1.58-1.60 -> 0.82-0.89 mm mean face error (2-3 views)
+    n_shape: 200
+    iters: 120
+    max_session_minutes: 30       # skipped when EXIF says the photos are from different sittings
+    min_ncc: 0.6                  # reverted when views still disagree (different expressions / sessions)
+  n_expr: 50                      # (landmarks68 fitter only)
   iters: 400
-  fit_focal: true                 # refine EXIF focal within [0.5x, 2x]
+  fit_focal: true
 
 stage3:
   mode: sculpt                    # Phase 4A sculpt detail (the only mode; v1 GAN / meso / legacy pores removed)
@@ -33,7 +69,11 @@ stage3:
                                   #        (subdivision 1/2/3/4 at <25/<60/<90/>=90; level 4 = 1.3M vertices)
   detail_resolution: 4096         # displacement / normal map resolution
   resolution: 1024
-  max_scale_mm: 1.0               # displacement PNG encodes ±1 mm; written to manifest for renderers
+  max_scale_mm: 1.0               # displacement PNG encodes ±1 mm (widened when measured folds are deeper); in the manifest
+  measured_detail: false          # >= 2 same-session views: grooves measured by multi-view consistency (refine_detail).
+                                  # OFF: on ground truth it recovers 0.7 of a 2.5 mm groove but adds short false
+                                  # creases over the whole face (skin texture read as relief). DOCS/04 Phase 1B
+  measured_highpass_mm: 6.0       # coarse shape stays in the Stage 2 vertex offsets
 
 stage4:
   enabled: true
@@ -56,6 +96,9 @@ stage7:
   delight_strength: 0.5           # 0..1. 1.0 removes the full fitted gradient but costs ~0.05 identity score
                                   # against the (lit) photo on the golden set; 0.5 keeps identity within ~0.01
   synthesize_skin: true           # Phase 3A: unseen areas get the subject's own skin grain
+  skin_transfer: true             # unseen skin = full-detail patches of the subject's calm forehead/cheek skin, in the
+                                  # tone of the neighbouring observed skin (was: micro grain on an edge-interpolated colour)
+  grazing_blend: true             # texels seen only edge-on (>~70 deg) fade into filled skin (no baked jaw shadow on the neck)
   white_balance: false            # gray-edge colour-cast removal; unreliable on single photos (see projector.py)
 
 stage8:
@@ -69,6 +112,7 @@ stage8:
 
 evaluation:
   enabled: true                   # overlays, turntables, report.json
+  judge: insightface              # identity judge for metrics only (research-licensed model, not shipped)
 
 render:
   enabled: false                  # Blender Cycles look-dev (slow on CPU); enable explicitly

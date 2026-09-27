@@ -20,7 +20,7 @@ fills unobserved texels, from data:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -157,20 +157,40 @@ class ProvenanceUVFill:
         exemplar_region: Optional[np.ndarray] = None,
         seed: int = 0,
         mesh: Optional[dict] = None,
+        exemplar_scale: float = 1.0,
         closed_regions: Optional[Dict[str, np.ndarray]] = None,
+        skin_transfer: bool = False,
+        observed_weight: Optional[np.ndarray] = None,
+        grazing: Tuple[float, float] = (0.03, 0.12),
     ) -> Dict[str, np.ndarray]:
         """
         exemplar_region: (R,R) bool UV mask of plain skin (e.g. forehead + cheeks without brows,
         eyes, lips). When given, unseen texels without a mirrored observation receive the
         subject's own synthesized skin grain on top of the interpolated colour.
+        exemplar_scale: texel density of the synthesized area / that of the exemplar area, so the
+        grain keeps its physical size (mm) when the UV layout gives regions different densities.
         mesh: optional dict(uv_raster, faces, uv, uv_faces, n_verts). When given, the colour of
         unseen regions is interpolated on the mesh (seam-free) instead of in UV space.
         closed_regions: optional {name: (R,R) bool}. Unseen texels inside such a region are
         interpolated only from observed texels of the same region (e.g. lips take lip colour,
         never skin or teeth), and get no synthesized skin grain.
+        skin_transfer: synthesized skin takes full mid-scale detail (mottling, pores, tone variation up to
+        a few mm) from the clean exemplar skin, and its base colour moves from the observed border's
+        colour to the exemplar's own tone further away, instead of micro grain on a drifting colour.
+        observed_weight: (R,R) projection weight (sum of cos^gamma over views). Texels seen only at a
+        grazing angle (weight below grazing[1], i.e. beyond ~70 deg in one view) fade into the filled skin: they carry smeared colour and
+        cast shadows (the jaw's shadow on the under-jaw), not the surface's own colour.
         """
         tex = texture_bgr.astype(np.float32)
-        obs = observed.astype(bool) & uv_valid
+        obs_all = observed.astype(bool) & uv_valid
+        obs = obs_all
+        blend_back = None
+        if observed_weight is not None:
+            lo, hi = grazing
+            a = np.clip((observed_weight - lo) / max(hi - lo, 1e-6), 0, 1)
+            a = a * a * (3 - 2 * a)
+            obs = obs_all & (a >= 1.0)                      # fully trusted texels feed the fill
+            blend_back = np.where(obs_all & ~obs, a, 0.0).astype(np.float32)
         if not obs.any():
             raise ValueError("No observed texels to fill from; projection produced an empty texture.")
 
@@ -215,9 +235,30 @@ class ProvenanceUVFill:
             from src.stage7_delight.skin_synthesis import synthesize_skin_detail
             synthesized = need & ~has_m & ~closed_any
             if synthesized.any():
-                grain = synthesize_skin_detail(tex, obs, exemplar_region, synthesized, seed=seed)
+                if skin_transfer:
+                    # full-detail patches of the subject's own clean skin, on the exemplar's tone away from
+                    # the observed border (a bald scalp is forehead skin, not interpolated neck colour)
+                    # tone of the observed skin bordering the gap (what the eye compares it with),
+                    # not the edge-interpolated drift toward neck and ear colours
+                    band = obs & exemplar_region & (cv2.distanceTransform(obs.astype(np.uint8), cv2.DIST_L2, 5)
+                                                    < 0.03 * obs.shape[0])
+                    band = band if band.sum() > 200 else obs & exemplar_region
+                    tone = np.median(tex[band], axis=0)
+                    dist = cv2.distanceTransform((~obs).astype(np.uint8), cv2.DIST_L2, 5)
+                    b = np.clip(dist / (0.04 * obs.shape[0]), 0, 1)[..., None]
+                    b = b * b * (3 - 2 * b)
+                    low = np.where(synthesized[..., None], (1 - b) * low + b * tone[None, None], low)
+                    grain = synthesize_skin_detail(tex, obs, exemplar_region, synthesized, seed=seed,
+                                                   exemplar_scale=exemplar_scale,
+                                                   sigma_px=0.006 * obs.shape[0], patch=56, calm_fraction=0.5)
+                else:
+                    grain = synthesize_skin_detail(tex, obs, exemplar_region, synthesized, seed=seed,
+                                                   exemplar_scale=exemplar_scale)
                 out[synthesized] = low[synthesized] + grain[synthesized]
         out[obs] = tex[obs]
+        if blend_back is not None:
+            ramp = blend_back > 0
+            out[ramp] = blend_back[ramp, None] * tex[ramp] + (1 - blend_back[ramp, None]) * out[ramp]
 
         prov = np.zeros(obs.shape, np.uint8)
         prov[obs] = OBSERVED
@@ -259,8 +300,10 @@ def load_or_build_mirror_map(
     template_vertices: np.ndarray,
     faces: np.ndarray,
 ) -> np.ndarray:
+    import hashlib
     res = uv_raster.mask.shape[0]
-    path = Path(cache_dir) / f"flame_uv_mirror_{res}.npy"
+    layout = hashlib.sha1(np.ascontiguousarray(uv_raster.face_id).tobytes()).hexdigest()[:12]   # one map per UV layout
+    path = Path(cache_dir) / f"flame_uv_mirror_{res}_{layout}.npy"
     if path.exists():
         mm = np.load(path)
         if mm.shape[:2] == uv_raster.mask.shape:

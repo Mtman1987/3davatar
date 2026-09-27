@@ -7,22 +7,29 @@ from pathlib import Path
 import numpy as np
 
 
+_ROOT = Path(__file__).resolve().parent.parent.parent
+# Commercial default: our clean-room layout (scripts/build_clean_uv.py, DOCS/07 C1b). The FLAME
+# texture space distributed with MICA (head_template.obj) is used only when a config asks for it.
+_UV_LAYOUT = _ROOT / 'data' / 'flame_model' / 'uv_layout_open.npz'
+
+
+def set_default_uv_layout(path) -> None:
+    """Select the UV layout every stage uses (config key flame.uv_layout)."""
+    global _UV_LAYOUT
+    p = Path(path)
+    _UV_LAYOUT = p if p.is_absolute() else _ROOT / p
+
+
 def load_flame_uv_layout(uv_template_path: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Loads canonical FLAME UV coordinates and texture faces.
-    Resolves automatically from standard repository paths if not explicitly provided.
+    Loads the FLAME UV coordinates and texture faces: `uv_template_path` if given, else the layout
+    chosen by set_default_uv_layout (default: the clean-room data/flame_model/uv_layout_open.npz).
     """
-    candidates = []
-    if uv_template_path:
-        candidates.append(Path(uv_template_path))
-
-    root = Path(__file__).resolve().parent.parent.parent
-    candidates.extend([
-        root / 'data' / 'flame_model' / 'head_template.obj',
-        root / 'data' / 'flame_model' / 'FLAME_texture.npz',
-        root / 'data' / 'FLAME2020' / 'head_template.obj',
-        root / 'vendor' / 'MICA' / 'data' / 'FLAME2020' / 'head_template.obj',
-    ])
+    cand = Path(uv_template_path) if uv_template_path else _UV_LAYOUT
+    if not cand.exists():
+        raise FileNotFoundError(
+            f"UV layout {cand} not found. Build the clean-room layout with:\n  python3 scripts/build_clean_uv.py")
+    candidates = [cand]
 
     resolved_path = None
     for cand in candidates:

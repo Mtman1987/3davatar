@@ -137,6 +137,8 @@ class MultiViewTextureProjector:
         delight_fit_region: Optional[np.ndarray] = None,
         delight_strength: Optional[np.ndarray] = None,
         white_balance: bool = False,
+        exclusive_faces: Optional[Sequence[np.ndarray]] = None,
+        exclusive_margin_px: float = 0.01,
     ) -> Dict[str, np.ndarray]:
         """
         photos[i]       : (H, W, 3) uint8 BGR
@@ -149,6 +151,10 @@ class MultiViewTextureProjector:
                           result also contains 'albedo_rgb' (delit, average tone preserved).
         delight_strength : optional (R,R) float in [0,1]: exponent on the correction per texel
                           (lower where coarse normals are unreliable, e.g. eyes and lips).
+        exclusive_faces : optional list of (F,) bool face sets (e.g. each ear). Photo pixels where such a
+                          set projects (grown by exclusive_margin_px x image height) are sampled
+                          only by texels of that set: a protruding real ear never paints onto the
+                          side of the head when the model's ear is flatter than the subject's.
         white_balance   : neutralize the light colour (gray-edge, bounded). Off by default: on single
                           photos clothing and backgrounds dominate the estimate (a blue suit
                           turned skin green in testing); proper colour-cast removal is Phase 3B.
@@ -201,6 +207,12 @@ class MultiViewTextureProjector:
             skin_ok = skin[np.clip(pxy[:, 1].astype(np.int64), 0, H - 1),
                            np.clip(pxy[:, 0].astype(np.int64), 0, W - 1)]
             keep = inb & front & skin_ok & (cos > self.min_cos)
+            for ex in exclusive_faces or []:
+                ex = np.asarray(ex, bool)
+                ev = rasterize(vxy, vz, faces[ex], hs, ws).face_id >= 0
+                k = max(3, int(exclusive_margin_px * hs) | 1)
+                em = cv2.dilate(ev.astype(np.uint8), np.ones((k, k), np.uint8)) > 0
+                keep &= ~(em[zy, zx] & ~ex[fid])
             coverage.append(float(keep.sum()) / max(1, len(keep)))
             if not keep.any():
                 continue

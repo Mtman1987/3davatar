@@ -1,3 +1,13 @@
+# AI agent guidance & maintenance (local only, not on GitHub)
+DOCS/
+AGENTS.md
+GUIDE.md
+MEMORY.md
+remember.md
+roadmap.md
+DATASETS.md
+Research.md
+
 # Python
 __pycache__/
 *.py[cod]

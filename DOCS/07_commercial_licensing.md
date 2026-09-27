@@ -82,19 +82,81 @@ Your Kaggle token works (verified 2026-09-25). Kaggle's own terms allow training
 
 ## 6. Switch plan (Phase C, can run in parallel with Phase 1)
 
-| Step | Work | Gate |
-|---|---|---|
-| **C1** | Load FLAME 2023 Open; check vertex count, UVs, landmark embedding and masks; regenerate mirror and region maps | All tests pass on FLAME Open; golden-set identity within 0.02 of the FLAME 2020 run |
-| **C2** | Replace InsightFace detection and 68 landmarks with MediaPipe (478); build our own 478→FLAME Open barycentric correspondence | Landmark error ≤ current (mean 5.8 % IOD) |
-| **C3** | Remove MICA: β from the Phase 1 fitter (landmarks + dense + photometric), initialized at the FLAME mean | Golden-set identity ≥ the Phase 3A/4A run. Expect a dip until the Phase 1 fitter is complete |
-| **C4** | Evaluation judge: license InsightFace commercially, or adopt a commercially licensed recognizer | Decision recorded |
-| **C5** | Build the commercial training corpus (PD government portraits + your captures, optionally Unsplash Lite after review; Triplegangers ML licence if budget allows); train T1/T2 on Kaggle | Phase 3B / 4B gates |
+| Step | Work | Gate | Status (2026-09-26) |
+|---|---|---|---|
+| **C1** | Load FLAME 2023 Open; check vertex count, UVs, landmark embedding and masks; regenerate mirror and region maps | All tests pass on FLAME Open; golden-set identity within 0.02 of the FLAME 2020 run | **Done.** Masks and embedding rebuilt clean-room (C1a); own UV layout (C1b) |
+| **C1a** | Clean-room region masks + MediaPipe→FLAME embedding from FLAME 2023 Open geometry and MediaPipe's canonical mesh only (`scripts/build_clean_assets.py`) | No MICA / FLAME 2020 input; ground truth no worse | **Done.** Ground truth *better*: single view 1.438 → 1.205 mm, 3-view 0.861 → 0.680 mm |
+| **C1b** | UV layout: `data/flame_model/head_template.obj` came via the MICA repository, and the CC-BY licence names only the FLAME 2023 Open model | Written permission from MPI (flame@tuebingen.mpg.de) **or** our own layout | **Done (own layout), 2026-09-26.** `scripts/build_clean_uv.py`: 7 islands (face, 2 head halves, 2 ears, 2 eyeballs), LSCM + raster packing, no MICA input. Face 10.7 texels/mm at 4K (old layout 12.2) with less stretch (p90/p10 density 2.2 vs 3.4). Golden-set identity within 0.006 of the old layout (DOCS/04 Phase C1b) |
+| **C2** | Replace InsightFace detection and 68 landmarks with MediaPipe (478); build our own 478→FLAME Open barycentric correspondence | Landmark error ≤ current (mean 5.8 % IOD) | **Done.** 2.1–3.1 % IOD on the golden set (478-point metric) |
+| **C3** | Remove MICA: β from the Phase 1 fitter (landmarks + dense + photometric), initialized at the FLAME mean | Golden-set identity ≥ the Phase 3A/4A run. Expect a dip until the Phase 1 fitter is complete | **Done, gate not met on single photos** (see §7). Multi-photo input more than closes the gap on ground truth |
+| **C4** | Evaluation judge: license InsightFace commercially, or adopt a commercially licensed recognizer | Decision recorded | Open (InsightFace stays evaluation-only) |
+| **C5** | Build the commercial training corpus (PD government portraits + your captures, optionally Unsplash Lite after review; Triplegangers ML licence if budget allows); train T1/T2 on Kaggle | Phase 3B / 4B gates | Open |
 
 **What I need from you:**
-1. Download FLAME 2023 Open (registration and licence acceptance must be done by you).
-2. Decide on the evaluation judge (C4).
-3. Decide whether to contact Triplegangers for an ML licence.
-4. Legal sign-off on Unsplash Lite (optional).
+1. ~~Download FLAME 2023 Open~~ (done 2026-09-25).
+2. ~~Email MPI about the FLAME texture space (C1b)~~: no longer needed, we ship our own layout.
+3. Decide on the evaluation judge (C4).
+4. Decide whether to contact Triplegangers for an ML licence.
+5. Legal sign-off on Unsplash Lite (optional).
+
+## 7. Results: FLAME 2020 vs FLAME 2023 Open, and what the commercial switch costs
+
+**The model version is not the issue.**
+
+Capacity, fitting FLAME directly to the CC-BY Lee Perry-Smith scan (face region, mean / median):
+
+| Components | FLAME 2020 | FLAME 2023 Open |
+|---|---|---|
+| 100 | 0.338 / 0.233 mm | 0.348 / 0.223 mm |
+| 300 | 0.351 / 0.187 mm | 0.388 / 0.189 mm |
+
+The two are equivalent. Same topology; the templates differ by 1.9 mm on average.
+
+**Reconstruction from photos.** Ground-truth renders of the same scan, mean / median face error.
+
+| Pipeline | Licence | 1 photo (4 scenes) | 3 photos, same session |
+|---|---|---|---|
+| Old: MICA + 68 landmarks | non-commercial | 1.396 / ~0.65 mm | n/a |
+| New fitter, FLAME 2020 + MICA prior (best) | non-commercial | 1.342 / 0.811 mm | n/a |
+| New fitter, FLAME 2023 Open, old embedding | **commercial model**, non-commercial-derived assets | 1.438 / 0.849 mm (EXIF focal trusted) | 0.861 / 0.677 mm (+ multi-view refinement) |
+| **New fitter, FLAME 2023 Open, clean-room assets** | **commercial** | **1.205 / 0.659 mm** | **0.680 / 0.496 mm** (+ multi-view refinement) |
+
+**Real single photos.** The 9-subject golden set, mean identity similarity of our render to the input
+photo (front / +30° / −30°; InsightFace judge, evaluation only):
+
+| Pipeline | Front | +30° | −30° |
+|---|---|---|---|
+| old research path (MICA + 68) | 0.762 | 0.663 | 0.706 |
+| research (FLAME 2020 + MICA + new fitter) | 0.741 | 0.651 | 0.691 |
+| commercial, first cut | 0.731 | 0.634 | 0.668 |
+| commercial + EXIF focal trusted | 0.736 | 0.651 | 0.678 |
+| **commercial + clean-room assets (shipping config)** | **0.725** | **0.623** | **0.672** |
+
+**Reading.**
+- Use FLAME 2023 Open.
+- The clean-room assets score slightly lower on this golden set than the old embedding (−0.011 /
+  −0.028 / −0.006). Two reasons:
+  - The old embedding was built from fits of these same nine subjects, so the set favours it.
+  - It carried per-landmark reliability weights (cross-subject spread) that the clean map does not
+    have yet.
+
+  On the unbiased ground-truth scan the clean assets are 16–27% more accurate and 5× better in scale.
+  The old embedding is non-commercial-derived and cannot ship anyway. Next experiment: reliability
+  weights from a clean source (MediaPipe jitter under test-time augmentation on public-domain
+  portraits).
+- On single photos, a MICA-like identity prior is worth about 0.02–0.03 identity similarity. The
+  commercial replacement is a self-trained prior (C5 / Phase 3B).
+- With 2–3 photos from one sitting, dense multi-view photo-consistency (Phase 1B) beats every
+  single-photo path, including the non-commercial ones, by 40–50% on ground truth.
+- Caveat: one ground-truth head. Add more CC-BY scans before generalizing.
+
+**Provenance finding (2026-09-26).** The first commercial cut still used three non-commercial-derived
+inputs:
+- FLAME 2020 masks from MICA;
+- a MediaPipe→FLAME embedding whose anchors came from MICA + FLAME 2020 fits;
+- the MICA-distributed UV layout.
+
+The first two are replaced by clean-room builds (C1a), the UV layout by our own (C1b).
 
 ## Sources
 

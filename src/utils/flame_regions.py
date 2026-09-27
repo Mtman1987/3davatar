@@ -1,10 +1,12 @@
 """
 FLAME region masks in UV space.
 
-Sources (no bounding-box heuristics):
-  * the official FLAME vertex masks shipped with MICA
-    (vendor/MICA/data/FLAME2020/FLAME_masks/FLAME_masks.pkl: face, forehead, nose, lips,
-    eye_region, scalp, neck, ears, eyeballs, boundary), and
+Sources:
+  * vertex masks (face, forehead, nose, lips, eye_region, scalp, neck, ears, eyeballs, boundary):
+    by default our clean-room masks built from FLAME 2023 Open geometry + MediaPipe landmarks
+    (data/flame_model/region_masks_open.npz, scripts/build_clean_assets.py; commercial path).
+    The official FLAME masks shipped with MICA (non-commercial) can be selected explicitly with
+    `flame.region_masks` (research config) or set_default_masks(); and
   * landmark-derived feature masks (brows, eye openings, lip border), drawn in UV from the
     68-landmark embedding on the mesh, because FLAME has no brow region.
 
@@ -22,13 +24,26 @@ import numpy as np
 from src.render.soft_raster import RasterOut
 
 ROOT = Path(__file__).resolve().parents[2]
-MASKS_PKL = ROOT / "vendor" / "MICA" / "data" / "FLAME2020" / "FLAME_masks" / "FLAME_masks.pkl"
+MASKS_PKL = ROOT / "vendor" / "MICA" / "data" / "FLAME2020" / "FLAME_masks" / "FLAME_masks.pkl"   # non-commercial
+MASKS_OPEN = ROOT / "data" / "flame_model" / "region_masks_open.npz"                                # clean-room
+_default_masks: Path = MASKS_OPEN
+
+
+def set_default_masks(path) -> None:
+    """Select the vertex-mask file used when load_vertex_masks() is called without a path."""
+    global _default_masks
+    _default_masks = Path(path) if Path(path).is_absolute() else ROOT / path
 
 
 def load_vertex_masks(path: Optional[Path] = None) -> Dict[str, np.ndarray]:
-    p = Path(path) if path else MASKS_PKL
+    p = Path(path) if path else _default_masks
     if not p.exists():
-        raise FileNotFoundError(f"FLAME region masks not found at {p} (vendor/MICA submodule).")
+        hint = ("run `python3 scripts/build_clean_assets.py`" if p == MASKS_OPEN
+                else "check flame.region_masks in the config (the MICA masks need the vendor/MICA submodule)")
+        raise FileNotFoundError(f"FLAME region masks not found at {p}: {hint}.")
+    if p.suffix == ".npz":
+        m = np.load(p)
+        return {k: np.asarray(m[k], np.int64) for k in m.files if k != "source"}
     with open(p, "rb") as fh:
         m = pickle.load(fh, encoding="latin1")
     return {k: np.asarray(v, np.int64) for k, v in m.items()}
@@ -102,5 +117,38 @@ def feature_masks(lmk_uv: np.ndarray, R: int) -> Dict[str, np.ndarray]:
     k = max(3, int(0.06 * iod))
     ring = cv2.dilate(outer, np.ones((k, k), np.uint8)) - cv2.erode(outer, np.ones((k, k), np.uint8))
     out["lip_border"] = ring > 0
+    out["lips_landmark"] = outer > 0
+    return out
+
+
+def embedding_uv(emb: Dict[str, np.ndarray], faces: np.ndarray, uv: np.ndarray, uv_faces: np.ndarray) -> np.ndarray:
+    """UV coordinates of an embedding given as {face_idx, bary} (e.g. our MediaPipe embedding)."""
+    fidx = np.asarray(emb["face_idx"]).astype(np.int64).reshape(-1)
+    return (uv[uv_faces[fidx]] * np.asarray(emb["bary"]).reshape(-1, 3)[..., None]).sum(1)
+
+
+MP_BROW_A = [70, 63, 105, 66, 107]
+MP_BROW_B = [300, 293, 334, 296, 336]
+
+
+def feature_masks_mp(lmk_uv: np.ndarray, R: int) -> Dict[str, np.ndarray]:
+    """feature_masks() from MediaPipe landmarks through our own (commercial) embedding."""
+    from src.stage0_preprocess.landmarks_mp import EYE_A, EYE_B, LIPS_OUTER
+    px = np.stack([lmk_uv[:, 0] * R, (1 - lmk_uv[:, 1]) * R], 1)
+    iod = float(np.linalg.norm(px[EYE_A].mean(0) - px[EYE_B].mean(0)))
+    out = {}
+    brows = np.zeros((R, R), np.uint8)
+    for seg in (MP_BROW_A, MP_BROW_B):
+        cv2.polylines(brows, [np.round(px[seg]).astype(np.int32)], False, 1,
+                      thickness=max(2, int(0.16 * iod)), lineType=cv2.LINE_AA)
+    out["brows"] = brows > 0
+    eyes = np.zeros((R, R), np.uint8)
+    for seg in (EYE_A, EYE_B):
+        cv2.fillPoly(eyes, [np.round(px[seg]).astype(np.int32)], 1)
+    out["eye_openings"] = cv2.dilate(eyes, np.ones((max(3, int(0.08 * iod)),) * 2, np.uint8)) > 0
+    outer = np.zeros((R, R), np.uint8)
+    cv2.fillPoly(outer, [np.round(px[LIPS_OUTER]).astype(np.int32)], 1)
+    k = max(3, int(0.06 * iod))
+    out["lip_border"] = (cv2.dilate(outer, np.ones((k, k), np.uint8)) - cv2.erode(outer, np.ones((k, k), np.uint8))) > 0
     out["lips_landmark"] = outer > 0
     return out

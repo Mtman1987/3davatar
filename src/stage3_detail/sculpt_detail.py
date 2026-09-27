@@ -70,7 +70,8 @@ def _resize(a: np.ndarray, R: int, nearest: bool = False) -> np.ndarray:
     return cv2.resize(a.astype(np.float32) if not nearest else a.astype(np.uint8), (R, R), interpolation=interp)
 
 
-def photo_meso(albedo_bgr: np.ndarray, usable: np.ndarray, mask: np.ndarray, texel_mm: float) -> np.ndarray:
+def photo_meso(albedo_bgr: np.ndarray, usable: np.ndarray, mask: np.ndarray, texel_mm: float,
+               shading_signal: np.ndarray = None) -> np.ndarray:
     """
     Photo-derived wrinkle grooves (mm, <= 0) at the albedo resolution; 0 outside `mask`.
 
@@ -80,13 +81,19 @@ def photo_meso(albedo_bgr: np.ndarray, usable: np.ndarray, mask: np.ndarray, tex
     elongated dark creases only; groove depth grows with the crease scale. Pigment is further
     suppressed where chroma changes along with luminance.
     """
-    lab = cv2.cvtColor(albedo_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-    lum = np.log(lab[..., 0] / 255.0 * 0.99 + 0.01)
     m = usable & mask
-    lum = np.where(m, lum, masked_blur(lum, m, 3.0 / texel_mm))       # no edges from mask borders
-    ab = lab[..., 1:]
-    cmag = np.linalg.norm(masked_blur(ab, m, 0.4 / texel_mm) - masked_blur(ab, m, 3.0 / texel_mm), axis=-1)
-    pigment_w = np.exp(-(cmag / (np.median(cmag[m]) * 3.0 + 1e-6)) ** 2)
+    if shading_signal is not None:
+        # caller-supplied relief shading signal (already pigment-separated): skip the colour heuristic
+        lum = np.where(m, shading_signal.astype(np.float32), 0.0)
+        lum = np.where(m, lum, masked_blur(lum, m, 3.0 / texel_mm))
+        pigment_w = np.ones_like(lum)
+    else:
+        lab = cv2.cvtColor(albedo_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        lum = np.log(lab[..., 0] / 255.0 * 0.99 + 0.01)
+        lum = np.where(m, lum, masked_blur(lum, m, 3.0 / texel_mm))       # no edges from mask borders
+        ab = lab[..., 1:]
+        cmag = np.linalg.norm(masked_blur(ab, m, 0.4 / texel_mm) - masked_blur(ab, m, 3.0 / texel_mm), axis=-1)
+        pigment_w = np.exp(-(cmag / (np.median(cmag[m]) * 3.0 + 1e-6)) ** 2)
 
     depth = np.zeros_like(lum)
     for sigma_mm, depth_mm in MESO_SCALES:
@@ -130,6 +137,29 @@ def _keep_elongated(depth: np.ndarray, texel_mm: float, min_len_mm: float = 2.5,
     drop = strong & ~keep[lab]
     drop = cv2.dilate(drop.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     return np.where(drop, 0.0, depth).astype(np.float32)
+
+
+def measured_creases(relief_mm: np.ndarray, texel_mm: float, min_len_mm: float = 2.5) -> np.ndarray:
+    """
+    Keeps only the elongated valleys (grooves, creases, folds' lower edges) of a measured relief map
+    (mm, negative = inward), with their measured depth; returns <= 0. Multi-view photo consistency
+    also turns skin-texture pattern into blob-shaped relief of +-0.5 mm; on the groove ground truth this
+    filter keeps the 2.5 mm groove at ~1 mm and cuts that false relief from 0.34 to 0.14 mm RMS.
+    """
+    line = np.zeros_like(relief_mm)
+    for s_mm in (1.0, 2.0, 3.0):
+        s = s_mm / texel_mm
+        g = cv2.GaussianBlur(relief_mm, (0, 0), s)
+        lxx = cv2.Sobel(g, cv2.CV_32F, 2, 0, ksize=3) * s ** 2
+        lyy = cv2.Sobel(g, cv2.CV_32F, 0, 2, ksize=3) * s ** 2
+        lxy = cv2.Sobel(g, cv2.CV_32F, 1, 1, ksize=3) * s ** 2
+        tr, det = lxx + lyy, lxx * lyy - lxy ** 2
+        disc = np.sqrt(np.maximum(tr ** 2 / 4 - det, 0))
+        l1, l2 = tr / 2 + disc, tr / 2 - disc
+        line = np.maximum(line, np.exp(-(np.abs(l2) / (np.abs(l1) + 1e-9)) ** 2 / 0.5) * (l1 > 0))
+    depth = np.maximum(-relief_mm, 0) * (line > 0.5)
+    depth = _keep_elongated(depth.astype(np.float32), texel_mm, min_len_mm=min_len_mm, min_aspect=2.5)
+    return (-depth).astype(np.float32)
 
 
 def _oriented_kernel(length_px: float, width_px: float, angle_deg: float) -> np.ndarray:
@@ -215,6 +245,8 @@ def build_detail(
     level: float,
     out_res: int = 4096,
     seed: int = 0,
+    shading_signal: np.ndarray = None,
+    shading_mask: np.ndarray = None,
 ) -> Dict[str, object]:
     """
     Returns dict(displacement_mm (out_res²), normal_rgb, meso_mm, micro_mm, settings).
@@ -236,17 +268,22 @@ def build_detail(
     meso_mask = cv2.erode(meso_mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
     usable = provenance >= 128                          # observed or symmetry-inferred
     face_mm = float(np.median(texel_mm[regions["face"] & valid]))
-    meso = photo_meso(albedo_bgr, usable, meso_mask, face_mm) if st.meso_gain > 0 else np.zeros((R0, R0), np.float32)
+    if shading_signal is not None:
+        usable = shading_mask if shading_mask is not None else usable
+    meso = (photo_meso(albedo_bgr, usable, meso_mask, face_mm, shading_signal=shading_signal)
+            if st.meso_gain > 0 else np.zeros((R0, R0), np.float32))
 
     micro = synth_micro(regs, texel_mm, out_res, seed) if st.micro_gain > 0 else np.zeros((out_res, out_res), np.float32)
     disp = _resize(meso, out_res) * st.meso_gain + micro * st.micro_gain
-    # nothing on the eyeballs; neck seam contract: zero at the FLAME boundary and bottom collar rows
+    # nothing on the eyeballs; neck seam contract: zero at the FLAME boundary and on the neck collar
     eyes = _resize(regions["left_eyeball"] | regions["right_eyeball"], out_res, True).astype(bool)
     seam = _resize(regions["boundary"], out_res, True).astype(np.float32)
     seam = cv2.GaussianBlur(cv2.dilate(seam, np.ones((9, 9), np.uint8)), (0, 0), 6)
     disp = disp * (1 - np.clip(seam * 2, 0, 1))
     disp[eyes] = 0
-    disp[int(0.85 * out_res):, :] = 0
+    # Rule 4 collar from the layout's own neck mask (any UV layout); legacy bottom-rows rule without one
+    from src.stage3_detail.fusion import _collar_falloff
+    disp = disp * _collar_falloff(out_res, regions.get("neck_pinning"))
     tmm = _resize(texel_mm, out_res) * (R0 / out_res)
     return {
         "displacement_mm": disp.astype(np.float32),

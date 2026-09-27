@@ -80,7 +80,13 @@ def stable_landmarks(emb_path: str) -> np.ndarray:
 
 
 def face_eval_vertices(flame: FLAMEModel) -> np.ndarray:
-    vm = load_vertex_masks()
+    # the metric's region is held fixed across experiments: the official FLAME masks (evaluation only,
+    # never shipped); falls back to our clean-room masks only when the MICA submodule is absent
+    from src.utils.flame_regions import MASKS_OPEN, MASKS_PKL
+    if not MASKS_PKL.exists():
+        print("[gt_scan_eval] official FLAME masks absent: evaluating on the clean-room region "
+              "(numbers are not comparable with runs that used the official region).")
+    vm = load_vertex_masks(MASKS_PKL if MASKS_PKL.exists() else MASKS_OPEN)
     face = np.setdiff1d(vm["face"], np.concatenate([vm["eye_region"], vm["left_eyeball"], vm["right_eyeball"]]))
     return face
 
