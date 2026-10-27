@@ -95,7 +95,7 @@ index 5da441b..ff6db2d 100644
    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
    const [booted, setBooted] = useState(0);
  
-@@ -56,6 +60,10 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop
+@@ -56,6 +60,10 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop, ref) {
        }
      },
      exportGlb: () => exportGroup(characterRef.current),
@@ -106,7 +106,7 @@ index 5da441b..ff6db2d 100644
    }));
  
    useEffect(() => {
-@@ -74,6 +82,37 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop
+@@ -74,6 +82,31 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop, ref) {
      const scene = new THREE.Scene();
      scene.background = new THREE.Color(0x171c23);
      sceneRef.current = scene;
@@ -142,9 +142,7 @@ index 5da441b..ff6db2d 100644
 +      scene.add(model);
 +    };
      const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 20);
- 
-     scene.add(new THREE.HemisphereLight(0xfff4e5, 0x1a1f28, 0.9));
-@@ -174,9 +213,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
+@@ -174,9 +207,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop, ref) {
          for (let i = 0; i < face.morphTargetInfluences.length; i++) {
            face.morphTargetInfluences[i] = influences[i] ?? 0;
          }
@@ -159,22 +157,10 @@ index 5da441b..ff6db2d 100644
        }
        const root = characterRef.current;
        if (root) {
-@@ -194,6 +235,7 @@ function blinkCurve(now: number) {
-     return () => {
-+      modelLoadRef.current = null;
-       cancelAnimationFrame(frame);
-       observer.disconnect();
-       canvas.removeEventListener("pointerdown", onDown);
-@@ -205,6 +247,7 @@ function blinkCurve(now: number) {
-         disposeCharacter(characterRef.current);
-         characterRef.current = null;
-         faceRef.current = null;
-+        loadedModelRef.current = null;
-       }
-       ground.geometry.dispose();
-       (ground.material as THREE.Material).dispose();
-@@ -217,7 +260,7 @@ function blinkCurve(now: number) {
+@@ -214,5 +249,5 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop, ref) {
    useEffect(() => {
      const scene = sceneRef.current;
 -    if (!scene) return;
 +    if (!scene || loadedModelRef.current) return;
+     if (characterRef.current) {
+       scene.remove(characterRef.current);
