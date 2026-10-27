@@ -1,0 +1,30 @@
+name: Inspect AvatarAce face workflow source
+on:
+  push:
+    branches:
+      - inspect-avatarace-face-source
+    paths:
+      - .github/workflows/inspect-avatarace-source.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source archive
+        run: unzip -q grok-workspace.zip -d recovered-workspace
+      - name: Locate face-generation code
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== FACE FILES ==='
+          find recovered-workspace/src -type f | grep -Ei 'face|avatar|studio' | sort | head -100
+          echo '=== FACE CACHE / GENERATION REFERENCES ==='
+          grep -R -nE 'getFaceCache|generateFace|FacePanel|faceChoice|makeFace' recovered-workspace/src/components/studio recovered-workspace/src/lib/avatar | head -160
+          echo '=== STUDIO APP FACE PANEL ==='
+          FILE=recovered-workspace/src/components/studio/StudioApp.tsx
+          if [ -f "$FILE" ]; then
+            LINE=$(grep -n 'function FacePanel\|const FacePanel\|function BodyPanel' "$FILE" | head -1 | cut -d: -f1 || true)
+            if [ -n "$LINE" ]; then START=$((LINE-25)); [ "$START" -lt 1 ] && START=1; END=$((LINE+240)); sed -n "${START},${END}p" "$FILE"; fi
+          fi
