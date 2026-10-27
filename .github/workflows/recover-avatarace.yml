@@ -1,40 +1,63 @@
-name: Recover AvatarAce workspace
+name: Recover and fix AvatarAce
 on:
   push:
     branches:
       - fix/avatarace-body-viewer-recovery
     paths:
       - .github/workflows/recover-avatarace.yml
+      - avatarace-patch/**
   workflow_dispatch:
 permissions:
   contents: read
   actions: write
 jobs:
-  inspect:
+  build-and-package:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository archive
+      - name: Checkout repository and source archive
         uses: actions/checkout@v4
-      - name: Inspect and extract workspace archive
+      - name: Recover workspace and apply integration
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== Archive entries (first 250) ===" | tee archive-inspection.txt
-          unzip -l grok-workspace.zip | head -n 255 | tee -a archive-inspection.txt
           mkdir -p recovered-workspace
           unzip -q grok-workspace.zip -d recovered-workspace
-          echo "=== Project manifests ===" | tee -a archive-inspection.txt
-          find recovered-workspace -type f \( -name package.json -o -name vite.config.ts -o -name next.config.js -o -name next.config.ts -o -name StudioApp.tsx -o -name Viewport.tsx -o -name store.ts \) -print | sort | tee -a archive-inspection.txt
-          echo "=== Root directories ===" | tee -a archive-inspection.txt
-          find recovered-workspace -maxdepth 2 -type d | sort | head -n 200 | tee -a archive-inspection.txt
-          echo "=== GitHub repository model files ===" | tee -a archive-inspection.txt
-          ls -lh *.glb 2>/dev/null | tee -a archive-inspection.txt || true
-      - name: Upload recovered workspace and inspection report
+          cp avatarace-patch/apply-avatarace-body-viewer-fix.py recovered-workspace/scripts/apply-avatarace-body-viewer-fix.py
+          python3 recovered-workspace/scripts/apply-avatarace-body-viewer-fix.py
+          mkdir -p recovered-workspace/public/models
+          cp male-base-mesh-base_male.glb recovered-workspace/public/models/male-base-mesh-base_male.glb
+          cp female-base-mesh-base_female.glb recovered-workspace/public/models/female-base-mesh-base_female.glb
+          cp "Meshy_AI_Neon_Lock_In_Gamer_All_Animations (1).glb" recovered-workspace/public/models/commissioned-finished-model.glb
+          echo "=== Applied body/viewer integration ==="
+          grep -nE 'bodyAsset|modelUrl|GLTFLoader|commissioned-finished-model' recovered-workspace/src/lib/avatar/store.ts recovered-workspace/src/components/studio/Viewport.tsx recovered-workspace/src/components/studio/StudioApp.tsx
+          echo "=== Model files ==="
+          ls -lh recovered-workspace/public/models
+      - name: Install dependencies
+        working-directory: recovered-workspace
+        run: npm ci
+      - name: Typecheck
+        working-directory: recovered-workspace
+        run: npm run typecheck
+      - name: Run tests
+        working-directory: recovered-workspace
+        run: npm test
+      - name: Production build
+        working-directory: recovered-workspace
+        run: npm run build:dev
+      - name: Create corrected downloadable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f AvatarAce-body-viewer-fixed.zip
+          zip -qr AvatarAce-body-viewer-fixed.zip recovered-workspace -x '*/node_modules/*' '*/.git/*'
+          sha256sum AvatarAce-body-viewer-fixed.zip | tee AvatarAce-body-viewer-fixed.sha256
+          ls -lh AvatarAce-body-viewer-fixed.zip
+      - name: Upload corrected project
         uses: actions/upload-artifact@v4
         with:
-          name: avatarace-recovered-workspace
+          name: AvatarAce-body-viewer-fixed
           path: |
-            recovered-workspace/
-            archive-inspection.txt
+            AvatarAce-body-viewer-fixed.zip
+            AvatarAce-body-viewer-fixed.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
