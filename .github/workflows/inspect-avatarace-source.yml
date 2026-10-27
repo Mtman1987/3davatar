@@ -22,20 +22,16 @@ jobs:
           find recovered-workspace/src -type f | grep -Ei 'face|avatar|studio' | sort | head -100
           echo '=== FACE CACHE / GENERATION REFERENCES ==='
           grep -R -nE 'getFaceCache|generateFace|FacePanel|faceChoice|makeFace' recovered-workspace/src/components/studio recovered-workspace/src/lib/avatar | head -160
-          echo '=== STUDIO APP FACE PANEL ==='
-          FILE=recovered-workspace/src/components/studio/StudioApp.tsx
-          if [ -f "$FILE" ]; then
-            LINE=$(grep -n 'function FacePanel\|const FacePanel\|function BodyPanel' "$FILE" | head -1 | cut -d: -f1 || true)
-            if [ -n "$LINE" ]; then START=$((LINE-25)); [ "$START" -lt 1 ] && START=1; END=$((LINE+240)); sed -n "${START},${END}p" "$FILE"; fi
-          fi
       - name: Print face builder and cache contracts
         shell: bash
         run: |
           set -euo pipefail
-          for FILE in recovered-workspace/src/lib/avatar/build-face.ts recovered-workspace/src/lib/avatar/face-cache.ts recovered-workspace/src/lib/avatar/store.ts recovered-workspace/src/lib/avatar/arkit.ts recovered-workspace/src/lib/avatar/constants.ts; do
+          for FILE in recovered-workspace/src/lib/avatar/build-face.ts recovered-workspace/src/lib/avatar/face-cache.ts recovered-workspace/src/lib/avatar/store.ts recovered-workspace/src/lib/avatar/arkit.ts recovered-workspace/src/lib/avatar/constants.ts recovered-workspace/src/lib/avatar/detect.ts; do
             echo "=== $FILE ==="
-            sed -n '1,320p' "$FILE"
+            sed -n '1,420p' "$FILE"
           done
+          echo '=== Studio face generation handlers ==='
+          sed -n '1,260p' recovered-workspace/src/components/studio/StudioApp.tsx
       - name: Upload original face-generation modules
         uses: actions/upload-artifact@v4
         with:
@@ -47,6 +43,3 @@ jobs:
             recovered-workspace/src/lib/avatar/arkit.ts
             recovered-workspace/src/components/studio/Viewport.tsx
           retention-days: 1
-          echo '=== Studio face generation handlers ==='
-          sed -n '1,260p' recovered-workspace/src/components/studio/StudioApp.tsx
-          sed -n '260,470p' recovered-workspace/src/components/studio/StudioApp.tsx
