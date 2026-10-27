@@ -1,0 +1,46 @@
+name: Build browser face builder bundle
+on:
+  push:
+    branches:
+      - feat/face-builder-browser-bundle
+    paths:
+      - .github/workflows/build-face-builder-bundle.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: false
+      - name: Extract AvatarAce source
+        run: unzip -q grok-workspace.zip -d recovered-workspace
+      - name: Install source dependencies
+        working-directory: recovered-workspace
+        run: npm ci
+      - name: Build browser face builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > recovered-workspace/src/lib/avatar/face-builder-entry.ts <<'EOF'
+          export { buildFace } from "./build-face";
+          export { ARKIT_BLENDSHAPE_NAMES } from "./arkit";
+          EOF
+          mkdir -p avatarace-patch
+          recovered-workspace/node_modules/.bin/esbuild recovered-workspace/src/lib/avatar/face-builder-entry.ts --bundle --format=iife --global-name=AvatarAceFaceBuilder --platform=browser --target=es2020 --outfile=avatarace-patch/face-builder-browser.js --tsconfig=recovered-workspace/tsconfig.json
+          wc -c avatarace-patch/face-builder-browser.js
+          head -c 160 avatarace-patch/face-builder-browser.js
+      - name: Commit generated browser bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add avatarace-patch/face-builder-browser.js
+          git commit -m "Build browser bundle for AvatarAce face generation"
+          git push origin feat/face-builder-browser-bundle
