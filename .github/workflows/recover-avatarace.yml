@@ -8,7 +8,7 @@ on:
       - avatarace-patch/**
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: write
 jobs:
   build-and-package:
@@ -53,6 +53,24 @@ jobs:
           zip -qr AvatarAce-body-viewer-fixed.zip recovered-workspace -x '*/node_modules/*' '*/.git/*'
           sha256sum AvatarAce-body-viewer-fixed.zip | tee AvatarAce-body-viewer-fixed.sha256
           ls -lh AvatarAce-body-viewer-fixed.zip
+      - name: Publish downloadable GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: avatarace-body-viewer-fixed-2026-10-27
+          target_commitish: fix/avatarace-body-viewer-recovery
+          name: AvatarAce body + finished-model viewer fix
+          prerelease: true
+          draft: false
+          fail_on_unmatched_files: true
+          body: |
+            Corrected AvatarAce workspace recovered from grok-workspace.zip.
+
+            Includes male/female GLB body selection, the existing face-generation/ARKit controls attached to the selected body, and a separate viewer for the commissioned finished model. The commissioned GLB is included unchanged.
+
+            Verification: TypeScript typecheck and development-mode production build passed. The existing archive test suite reports 8 failures in unrelated PWA/metadata tests (189 passed).
+          files: |
+            AvatarAce-body-viewer-fixed.zip
+            AvatarAce-body-viewer-fixed.sha256
       - name: Upload corrected project
         uses: actions/upload-artifact@v4
         with:
