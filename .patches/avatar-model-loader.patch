@@ -1,0 +1,180 @@
+diff --git a/src/components/studio/StudioApp.tsx b/src/components/studio/StudioApp.tsx
+index de015f7..6ba19f2 100644
+--- a/src/components/studio/StudioApp.tsx
++++ b/src/components/studio/StudioApp.tsx
+@@ -13,6 +13,7 @@ import {
+   Smile,
+   Square,
+   Trash2,
++  Upload,
+   UserRound,
+ } from "lucide-react";
+ import { BODIES, HAIR, OUTFITS, SKINS, VOICES, labelOf, type Panel } from "@/lib/avatar/constants";
+@@ -269,6 +270,8 @@ function Studio({
+ }) {
+   const state = useStudio();
+   const viewRef = useRef<ViewportHandle>(null);
++  const modelInputRef = useRef<HTMLInputElement>(null);
++  const [modelNote, setModelNote] = useState<string | null>(null);
+   const [saveNote, setSaveNote] = useState<string | null>(null);
+   const [showPhoneVoice, setShowPhoneVoice] = useState(false);
+ 
+@@ -347,6 +350,23 @@ function Studio({
+     state.patch({ talk: "off" });
+   }
+ 
++  async function loadModelFile(event: ChangeEvent<HTMLInputElement>) {
++    const file = event.target.files?.[0];
++    event.target.value = "";
++    if (!file) return;
++    if (!/\.glb$/i.test(file.name)) {
++      setModelNote("Choose a .glb 3D model.");
++      return;
++    }
++    setModelNote("Loading 3D model…");
++    try {
++      await viewRef.current?.loadModel(file);
++      setModelNote(`Loaded ${file.name}`);
++    } catch (error) {
++      setModelNote(error instanceof Error ? error.message : "Couldn't load that 3D model.");
++    }
++  }
++
+   async function download() {
+     try {
+       const blob = await viewRef.current?.exportGlb();
+@@ -392,6 +412,7 @@ function Studio({
+ 
+   return (
+     <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg lg:grid lg:grid-cols-[minmax(0,1fr)_400px]">
++      <input ref={modelInputRef} className="sr-only" type="file" accept=".glb,model/gltf-binary" onChange={(event) => void loadModelFile(event)} />
+       <div className="relative min-h-0 flex-1 bg-bg">
+         <Viewport
+           ref={viewRef}
+@@ -413,8 +434,13 @@ function Studio({
+             <ChevronLeft className="size-5" />
+           </button>
+           <p className="rounded-full bg-surface/90 px-3 py-1 text-xs tracking-wide text-muted">Drag to turn</p>
+-          <span className="size-11" />
++          <button type="button" className="pointer-events-auto flex h-11 items-center gap-2 rounded-full bg-surface/90 px-3 text-xs font-medium text-fg" onClick={() => modelInputRef.current?.click()} aria-label="Load a 3D model">
++            <Upload className="size-4" /> Load model
++          </button>
+         </div>
++        {modelNote ? (
++          <p className="absolute inset-x-3 bottom-4 text-center text-sm text-fg" role="status">{modelNote}</p>
++        ) : null}
+         {state.status === "working" ? (
+           <p className="absolute inset-x-0 bottom-4 text-center text-sm text-fg" role="status">
+             {state.statusText}
+diff --git a/src/components/studio/Viewport.tsx b/src/components/studio/Viewport.tsx
+index 5da441b..ff6db2d 100644
+--- a/src/components/studio/Viewport.tsx
++++ b/src/components/studio/Viewport.tsx
+@@ -1,6 +1,7 @@
+ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+ import * as THREE from "three";
+ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
++import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+ import { ARKIT_BLENDSHAPE_NAMES, PRESETS, type ArkitName, type Weights } from "@/lib/avatar/arkit";
+ import { buildCharacter, disposeCharacter } from "@/lib/avatar/build-body";
+ import type { BodyId, FaceChoice, HairId, OutfitId, Preset, SkinId } from "@/lib/avatar/constants";
+@@ -9,6 +10,7 @@ import { getFaceCache, type BuiltFace } from "@/lib/avatar/face-cache";
+ export type ViewportHandle = {
+   snapshot: () => string;
+   exportGlb: () => Promise<Blob>;
++  loadModel: (file: File) => Promise<void>;
+ };
+ 
+ type Props = {
+@@ -44,6 +46,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
+   const sceneRef = useRef<THREE.Scene | null>(null);
+   const characterRef = useRef<THREE.Group | null>(null);
+   const faceRef = useRef<THREE.Mesh | null>(null);
++  const loadedModelRef = useRef<THREE.Object3D | null>(null);
++  const modelLoadRef = useRef<((file: File) => Promise<void>) | null>(null);
+   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+   const [booted, setBooted] = useState(0);
+ 
+@@ -56,6 +60,10 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop
+       }
+     },
+     exportGlb: () => exportGroup(characterRef.current),
++    loadModel: (file: File) => {
++      if (!modelLoadRef.current) return Promise.reject(new Error("The 3D viewer is still starting."));
++      return modelLoadRef.current(file);
++    },
+   }));
+ 
+   useEffect(() => {
+@@ -74,6 +82,37 @@ export const Viewport = forwardRef<ViewportHandle>(function Viewport(prop
+     const scene = new THREE.Scene();
+     scene.background = new THREE.Color(0x171c23);
+     sceneRef.current = scene;
++    const loader = new GLTFLoader();
++    modelLoadRef.current = async (file: File) => {
++      const data = await file.arrayBuffer();
++      const gltf = await new Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTF>((resolve, reject) => {
++        loader.parse(data, "", resolve, reject);
++      });
++      const model = gltf.scene;
++      faceRef.current = null;
++      const box = new THREE.Box3().setFromObject(model);
++      const size = box.getSize(new THREE.Vector3());
++      if (!Number.isFinite(size.y) || size.y <= 0) throw new Error("This model has no measurable 3D geometry.");
++      model.scale.setScalar(1.72 / size.y);
++      const scaledBox = new THREE.Box3().setFromObject(model);
++      const center = scaledBox.getCenter(new THREE.Vector3());
++      model.position.x -= center.x;
++      model.position.z -= center.z;
++      model.position.y -= scaledBox.min.y;
++      model.traverse((object) => {
++        const mesh = object as THREE.Mesh;
++        if (mesh.isMesh && mesh.morphTargetInfluences && mesh.morphTargetDictionary && !faceRef.current) {
++          faceRef.current = mesh;
++        }
++      });
++      if (characterRef.current) {
++        scene.remove(characterRef.current);
++        disposeCharacter(characterRef.current);
++      }
++      characterRef.current = model as THREE.Group;
++      loadedModelRef.current = model;
++      scene.add(model);
++    };
+     const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 20);
+ 
+     scene.add(new THREE.HemisphereLight(0xfff4e5, 0x1a1f28, 0.9));
+@@ -174,9 +213,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
+         for (let i = 0; i < face.morphTargetInfluences.length; i++) {
+           face.morphTargetInfluences[i] = influences[i] ?? 0;
+         }
+-        face.scale.setScalar(current.headScale);
+-        face.position.y = current.headY;
+-        face.position.z = 0.055 + current.headZ;
++        if (loadedModelRef.current !== characterRef.current) {
++          face.scale.setScalar(current.headScale);
++          face.position.y = current.headY;
++          face.position.z = 0.055 + current.headZ;
++        }
+       }
+       const root = characterRef.current;
+       if (root) {
+@@ -194,6 +235,7 @@ function blinkCurve(now: number) {
+     return () => {
++      modelLoadRef.current = null;
+       cancelAnimationFrame(frame);
+       observer.disconnect();
+       canvas.removeEventListener("pointerdown", onDown);
+@@ -205,6 +247,7 @@ function blinkCurve(now: number) {
+         disposeCharacter(characterRef.current);
+         characterRef.current = null;
+         faceRef.current = null;
++        loadedModelRef.current = null;
+       }
+       ground.geometry.dispose();
+       (ground.material as THREE.Material).dispose();
+@@ -217,7 +260,7 @@ function blinkCurve(now: number) {
+   useEffect(() => {
+     const scene = sceneRef.current;
+-    if (!scene) return;
++    if (!scene || loadedModelRef.current) return;
