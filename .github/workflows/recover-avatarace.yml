@@ -27,7 +27,7 @@ jobs:
           mkdir -p recovered-workspace/public/models
           cp male-base-mesh-base_male.glb recovered-workspace/public/models/male-base-mesh-base_male.glb
           cp female-base-mesh-base_female.glb recovered-workspace/public/models/female-base-mesh-base_female.glb
-          cp "Meshy_AI_Neon_Lock_In_Gamer_All_Animations (1).glb" recovered-workspace/public/models/commissioned-finished-model.glb
+          cp "Meshy_AI_Neon_Lock_In_Gamer_All_Animations%20(1).glb" recovered-workspace/public/models/commissioned-finished-model.glb
           echo "=== Applied body/viewer integration ==="
           grep -nE 'bodyAsset|modelUrl|GLTFLoader|commissioned-finished-model' recovered-workspace/src/lib/avatar/store.ts recovered-workspace/src/components/studio/Viewport.tsx recovered-workspace/src/components/studio/StudioApp.tsx
           echo "=== Model files ==="
