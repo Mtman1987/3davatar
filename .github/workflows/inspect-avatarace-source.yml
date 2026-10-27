@@ -28,3 +28,14 @@ jobs:
             LINE=$(grep -n 'function FacePanel\|const FacePanel\|function BodyPanel' "$FILE" | head -1 | cut -d: -f1 || true)
             if [ -n "$LINE" ]; then START=$((LINE-25)); [ "$START" -lt 1 ] && START=1; END=$((LINE+240)); sed -n "${START},${END}p" "$FILE"; fi
           fi
+      - name: Print face builder and cache contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for FILE in recovered-workspace/src/lib/avatar/build-face.ts recovered-workspace/src/lib/avatar/face-cache.ts recovered-workspace/src/lib/avatar/store.ts recovered-workspace/src/lib/avatar/arkit.ts recovered-workspace/src/lib/avatar/constants.ts; do
+            echo "=== $FILE ==="
+            sed -n '1,320p' "$FILE"
+          done
+          echo '=== Studio face generation handlers ==='
+          sed -n '1,260p' recovered-workspace/src/components/studio/StudioApp.tsx
+          sed -n '260,470p' recovered-workspace/src/components/studio/StudioApp.tsx
