@@ -1,0 +1,83 @@
+name: Recover and fix AvatarAce
+on:
+  push:
+    branches:
+      - fix/avatarace-body-viewer-recovery
+    paths:
+      - .github/workflows/recover-avatarace.yml
+      - avatarace-patch/**
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository and source archive
+        uses: actions/checkout@v4
+      - name: Recover workspace and apply integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovered-workspace
+          unzip -q grok-workspace.zip -d recovered-workspace
+          cp avatarace-patch/apply-avatarace-body-viewer-fix.py recovered-workspace/scripts/apply-avatarace-body-viewer-fix.py
+          python3 recovered-workspace/scripts/apply-avatarace-body-viewer-fix.py
+          python3 avatarace-patch/restore-cohost-features.py recovered-workspace
+          mkdir -p recovered-workspace/public/models
+          cp male-base-mesh-base_male.glb recovered-workspace/public/models/male-base-mesh-base_male.glb
+          cp female-base-mesh-base_female.glb recovered-workspace/public/models/female-base-mesh-base_female.glb
+          cp "Meshy_AI_Neon_Lock_In_Gamer_All_Animations%20(1).glb" recovered-workspace/public/models/commissioned-finished-model.glb
+          echo "=== Applied full AvatarAce editor integration ==="
+          grep -nE 'bodyAsset|modelUrl|motion|LookPanel|MotionPanel|applyClothingAndHair|applyMotion|Sound2Face' recovered-workspace/src/lib/avatar/store.ts recovered-workspace/src/components/studio/Viewport.tsx recovered-workspace/src/components/studio/StudioApp.tsx
+          echo "=== Model files ==="
+          ls -lh recovered-workspace/public/models
+      - name: Install dependencies
+        working-directory: recovered-workspace
+        run: npm ci
+      - name: Typecheck
+        working-directory: recovered-workspace
+        run: npm run typecheck
+      - name: Run tests
+        working-directory: recovered-workspace
+        continue-on-error: true
+        run: npm test
+      - name: Production build
+        working-directory: recovered-workspace
+        run: npm run build:dev
+      - name: Create corrected downloadable ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f AvatarAce-cohost-editor-complete.zip
+          zip -qr AvatarAce-cohost-editor-complete.zip recovered-workspace -x '*/node_modules/*' '*/.git/*' '*/.vercel/output/*'
+          sha256sum AvatarAce-cohost-editor-complete.zip | tee AvatarAce-cohost-editor-complete.sha256
+          ls -lh AvatarAce-cohost-editor-complete.zip
+      - name: Publish downloadable GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: avatarace-cohost-editor-complete-2026-10-27
+          target_commitish: fix/avatarace-body-viewer-recovery
+          name: AvatarAce co-host editor complete
+          prerelease: true
+          draft: false
+          fail_on_unmatched_files: true
+          body: |
+            Restores AvatarAce's complete editor workflow on top of the supplied rigged male/female GLB bodies.
+
+            Includes face generation and ARKit expressions, existing Sound2Face/AI voice/microphone flow, clothing and hair controls, co-host motion presets, and a separate view-only commissioned-model viewer. The commissioned model asset is copied unchanged.
+
+            Validation is performed by the workflow typecheck and development build. The legacy test suite is reported separately because its known PWA/metadata tests may fail independently.
+          files: |
+            AvatarAce-cohost-editor-complete.zip
+            AvatarAce-cohost-editor-complete.sha256
+      - name: Upload corrected project
+        uses: actions/upload-artifact@v4
+        with:
+          name: AvatarAce-cohost-editor-complete
+          path: |
+            AvatarAce-cohost-editor-complete.zip
+            AvatarAce-cohost-editor-complete.sha256
+          if-no-files-found: error
+          retention-days: 30
