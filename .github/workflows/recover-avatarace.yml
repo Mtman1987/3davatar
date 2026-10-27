@@ -1,0 +1,40 @@
+name: Recover AvatarAce workspace
+on:
+  push:
+    branches:
+      - fix/avatarace-body-viewer-recovery
+    paths:
+      - .github/workflows/recover-avatarace.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository archive
+        uses: actions/checkout@v4
+      - name: Inspect and extract workspace archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Archive entries (first 250) ===" | tee archive-inspection.txt
+          unzip -l grok-workspace.zip | head -n 255 | tee -a archive-inspection.txt
+          mkdir -p recovered-workspace
+          unzip -q grok-workspace.zip -d recovered-workspace
+          echo "=== Project manifests ===" | tee -a archive-inspection.txt
+          find recovered-workspace -type f \( -name package.json -o -name vite.config.ts -o -name next.config.js -o -name next.config.ts -o -name StudioApp.tsx -o -name Viewport.tsx -o -name store.ts \) -print | sort | tee -a archive-inspection.txt
+          echo "=== Root directories ===" | tee -a archive-inspection.txt
+          find recovered-workspace -maxdepth 2 -type d | sort | head -n 200 | tee -a archive-inspection.txt
+          echo "=== GitHub repository model files ===" | tee -a archive-inspection.txt
+          ls -lh *.glb 2>/dev/null | tee -a archive-inspection.txt || true
+      - name: Upload recovered workspace and inspection report
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatarace-recovered-workspace
+          path: |
+            recovered-workspace/
+            archive-inspection.txt
+          if-no-files-found: error
+          retention-days: 14
