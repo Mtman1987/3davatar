@@ -23,8 +23,7 @@ jobs:
         working-directory: recovered-workspace
         run: npm ci
       - name: Install temporary bundler
-        working-directory: recovered-workspace
-        run: npm install --no-save --package-lock=false esbuild@0.25.12
+        run: npm install --prefix /tmp/face-builder-tools esbuild@0.25.12
       - name: Build browser face builder
         shell: bash
         run: |
@@ -34,7 +33,7 @@ jobs:
           export { ARKIT_BLENDSHAPE_NAMES } from "./arkit";
           EOF
           mkdir -p avatarace-patch
-          recovered-workspace/node_modules/.bin/esbuild recovered-workspace/src/lib/avatar/face-builder-entry.ts --bundle --format=iife --global-name=AvatarAceFaceBuilder --platform=browser --target=es2020 --outfile=avatarace-patch/face-builder-browser.js --tsconfig=recovered-workspace/tsconfig.json
+          /tmp/face-builder-tools/node_modules/.bin/esbuild recovered-workspace/src/lib/avatar/face-builder-entry.ts --bundle --format=iife --global-name=AvatarAceFaceBuilder --platform=browser --target=es2020 --outfile=avatarace-patch/face-builder-browser.js --tsconfig=recovered-workspace/tsconfig.json
           wc -c avatarace-patch/face-builder-browser.js
           head -c 160 avatarace-patch/face-builder-browser.js
       - name: Commit generated browser bundle
