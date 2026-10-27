@@ -17,7 +17,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: false
       - name: Extract AvatarAce source
         run: unzip -q grok-workspace.zip -d recovered-workspace
       - name: Install source dependencies
