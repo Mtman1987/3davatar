@@ -36,6 +36,17 @@ jobs:
             echo "=== $FILE ==="
             sed -n '1,320p' "$FILE"
           done
+      - name: Upload original face-generation modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatarace-face-source
+          path: |
+            recovered-workspace/src/lib/avatar/build-face.ts
+            recovered-workspace/src/lib/avatar/face-cache.ts
+            recovered-workspace/src/lib/avatar/detect.ts
+            recovered-workspace/src/lib/avatar/arkit.ts
+            recovered-workspace/src/components/studio/Viewport.tsx
+          retention-days: 1
           echo '=== Studio face generation handlers ==='
           sed -n '1,260p' recovered-workspace/src/components/studio/StudioApp.tsx
           sed -n '260,470p' recovered-workspace/src/components/studio/StudioApp.tsx
