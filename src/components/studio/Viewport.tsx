@@ -138,6 +138,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     let cancelled = false;
     const loader = new OBJLoader();
     let shirtObject: THREE.Group | null = null;
+    let shirtTexture: THREE.Texture | null = null;
     loader.load("/models/clothing/male-shirt/crude_male_shirt.obj", (shirt) => {
       if (cancelled || modelRef.current?.root !== root) {
         disposeModel(shirt);
@@ -190,6 +191,25 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       root.add(shirt);
       root.updateMatrixWorld(true);
       shirtObject = shirt;
+      new THREE.TextureLoader().load(
+        "/models/clothing/male-shirt/crude_male_tex.png",
+        (texture) => {
+          if (cancelled || modelRef.current?.root !== root) {
+            texture.dispose();
+            return;
+          }
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          material.map = texture;
+          material.color.set(0xffffff);
+          material.needsUpdate = true;
+          shirtTexture = texture;
+        },
+        undefined,
+        () => {
+          // A solid material remains usable if the optional source texture fails.
+        },
+      );
     }, undefined, (error) => {
       if (!cancelled) {
         const detail = error instanceof Error ? error.message : "Unknown OBJ loading error";
@@ -202,6 +222,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         shirtObject.parent?.remove(shirtObject);
         disposeModel(shirtObject);
       }
+      shirtTexture?.dispose();
     };
   }, [props.outfit, props.bodyAsset, props.modelUrl, booted]);
 
