@@ -9,7 +9,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("http://127.0.0.1:8080/", { waitUntil: "networkidle" });
+  await page.goto("http://127.0.0.1:8080/", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: /browse the studio first/i }).click();
   const canvas = page.locator("canvas").first();
   await canvas.waitFor({ state: "visible", timeout: 30_000 });
