@@ -223,7 +223,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     // scaling left the original chin visible below the captured face like a mask.
     faceMesh.scale.set(
       props.headScale / rootScale,
-      (props.headScale * 1.1) / rootScale,
+      (props.headScale * 0.98) / rootScale,
       props.headScale / rootScale,
     );
 
@@ -243,9 +243,10 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     );
     const targetWorld = headWorld.clone();
     // The normalized base body is about 2 viewer units tall (roughly 72 inches).
-    // Apply the requested fit adjustment: 1 inch lower and 3 inches forward,
-    // while retaining the interactive fine-tuning sliders.
-    targetWorld.y += height * (0.045 - 1 / 72) + props.headY;
+    // Start lower and slightly shorter than the previous trial: the photo
+    // face was sitting too high in the skull and its forehead/chin footprint
+    // extended too far vertically. The Head Y control remains the fine adjuster.
+    targetWorld.y += height * (0.015 - 1 / 72) + props.headY;
     // Keep the photo surface close to the skull. The former 0.035 + 3/72
     // offset pushed it roughly 4.3 inches forward on a normalized 6-foot avatar,
     // which made the reconstructed face read as a floating mask.
@@ -401,11 +402,11 @@ function trimUnderlyingNose(
 
   // Narrow center strip across the bridge/tip region only. The photo face stays
   // visible above it; the eyes, mouth, jaw, skull silhouette and neck remain.
-  const noseMinX = faceBounds.min.x + faceWidth * 0.40;
-  const noseMaxX = faceBounds.min.x + faceWidth * 0.60;
-  const noseMinY = faceBounds.min.y + faceHeight * 0.34;
-  const noseMaxY = faceBounds.min.y + faceHeight * 0.69;
-  const frontZ = headCenter.z + bodyHeight * 0.025;
+  const noseMinX = faceBounds.min.x + faceWidth * 0.44;
+  const noseMaxX = faceBounds.min.x + faceWidth * 0.56;
+  const noseMinY = faceBounds.min.y + faceHeight * 0.40;
+  const noseMaxY = faceBounds.min.y + faceHeight * 0.62;
+  const frontZ = headCenter.z + bodyHeight * 0.035;
 
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -532,7 +533,7 @@ function makeFeatheredFaceTexture(source: HTMLCanvasElement, uvs: Float32Array) 
   featherMask.width = canvas.width; featherMask.height = canvas.height;
   const featherContext = featherMask.getContext("2d");
   if (!featherContext) return canvas;
-  featherContext.filter = "blur(12px)";
+  featherContext.filter = "blur(18px)";
   featherContext.drawImage(mask, 0, 0);
   featherContext.filter = "none";
 
