@@ -201,6 +201,39 @@ document.getElementById('resetScores').addEventListener('click', () => {
   });
   document.getElementById('reportStatus').textContent = 'Scores and output attachments reset.';
 });
+
+async function loadRepositorySample() {
+  try {
+    const response = await fetch('/samples/portrait.jpg');
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const blob = await response.blob();
+    const imageFile = new File([blob], 'portrait.jpg', { type: blob.type || 'image/jpeg' });
+    const imageUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = async () => {
+      sourceRecord = {
+        filename: 'portrait.jpg',
+        path: 'public/samples/portrait.jpg',
+        mimeType: imageFile.type,
+        bytes: imageFile.size,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        sha256: await hashFile(imageFile)
+      };
+      sourceUrl = imageUrl;
+      sourcePreview.src = imageUrl;
+      sourcePreview.hidden = false;
+      sourceMeta.textContent = 'Repository sample loaded: ' + sourceRecord.width + ' × ' + sourceRecord.height + ' · ' + sourceRecord.bytes + ' bytes · SHA-256: ' + sourceRecord.sha256;
+      fairStatus.textContent = 'Ready. Download the exact sample above and upload that same file to each external demo.';
+      document.getElementById('copySource').disabled = false;
+    };
+    image.onerror = () => { URL.revokeObjectURL(imageUrl); sourceMeta.textContent = 'Could not decode repository sample image.'; };
+    image.src = imageUrl;
+  } catch (error) {
+    sourceMeta.textContent = 'Could not load repository sample. Open this page through the running AvatarAce app. ' + error.message;
+  }
+}
+loadRepositorySample();
 </script>
 </body>
 </html>
