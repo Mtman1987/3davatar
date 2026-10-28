@@ -278,8 +278,14 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loaded.root.add(faceMesh);
     loaded.root.updateMatrixWorld(true);
     if (headBone) headBone.attach(faceMesh);
+    loaded.root.updateMatrixWorld(true);
+    // Hide only the old central nose surface that protrudes through the photo
+    // face. This clones affected geometry and keeps skin indices, weights, and
+    // morph attributes intact; cleanup restores the original geometry.
+    const restoreBaseNose = trimUnderlyingNose(loaded.root, faceMesh, headBone, height);
     faceMeshRef.current = faceMesh;
     return () => {
+      restoreBaseNose();
       faceMesh.parent?.remove(faceMesh);
       disposeFaceMesh(faceMesh);
       if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
@@ -361,6 +367,88 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
     });
     mesh.material = Array.isArray(mesh.material) ? next : next[0]!;
   });
+}
+
+function trimUnderlyingNose(
+  root: THREE.Object3D,
+  photoFace: THREE.Mesh,
+  headBone: THREE.Bone | null,
+  bodyHeight: number,
+): () => void {
+  const restorations: Array<{ mesh: THREE.Mesh; geometry: THREE.BufferGeometry }> = [];
+  const ignored = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|jaw|lash|accessor|nail/i;
+  root.updateMatrixWorld(true);
+  photoFace.updateMatrixWorld(true);
+
+  const worldBounds = new THREE.Box3().setFromObject(photoFace);
+  const corners: THREE.Vector3[] = [];
+  for (const x of [worldBounds.min.x, worldBounds.max.x]) {
+    for (const y of [worldBounds.min.y, worldBounds.max.y]) {
+      for (const z of [worldBounds.min.z, worldBounds.max.z]) {
+        corners.push(root.worldToLocal(new THREE.Vector3(x, y, z)));
+      }
+    }
+  }
+  const faceBounds = new THREE.Box3().setFromPoints(corners);
+  const faceWidth = faceBounds.max.x - faceBounds.min.x;
+  const faceHeight = faceBounds.max.y - faceBounds.min.y;
+  if (faceWidth <= 0 || faceHeight <= 0) return () => {};
+
+  const headCenter = new THREE.Vector3();
+  if (headBone) headBone.getWorldPosition(headCenter);
+  else headCenter.set(faceBounds.getCenter(new THREE.Vector3()).x, faceBounds.getCenter(new THREE.Vector3()).y, faceBounds.getCenter(new THREE.Vector3()).z);
+  root.worldToLocal(headCenter);
+
+  // Narrow center strip across the bridge/tip region only. The photo face stays
+  // visible above it; the eyes, mouth, jaw, skull silhouette and neck remain.
+  const noseMinX = faceBounds.min.x + faceWidth * 0.40;
+  const noseMaxX = faceBounds.min.x + faceWidth * 0.60;
+  const noseMinY = faceBounds.min.y + faceHeight * 0.34;
+  const noseMaxY = faceBounds.min.y + faceHeight * 0.69;
+  const frontZ = headCenter.z + bodyHeight * 0.025;
+
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || mesh === photoFace || !mesh.geometry || ignored.test(mesh.name || "")) return;
+    const position = mesh.geometry.getAttribute("position");
+    if (!position || position.count < 3) return;
+
+    mesh.updateMatrixWorld(true);
+    const sourceIndex = mesh.geometry.getIndex();
+    const indexCount = sourceIndex ? sourceIndex.count : position.count;
+    if (indexCount < 3) return;
+    const kept: number[] = [];
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3();
+    for (let i = 0; i + 2 < indexCount; i += 3) {
+      const ia = sourceIndex ? sourceIndex.getX(i) : i;
+      const ib = sourceIndex ? sourceIndex.getX(i + 1) : i + 1;
+      const ic = sourceIndex ? sourceIndex.getX(i + 2) : i + 2;
+      a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld);
+      b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld);
+      d.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld);
+      root.worldToLocal(a); root.worldToLocal(b); root.worldToLocal(d);
+      const x = (a.x + b.x + d.x) / 3;
+      const y = (a.y + b.y + d.y) / 3;
+      const z = (a.z + b.z + d.z) / 3;
+      const noseTriangle = x >= noseMinX && x <= noseMaxX &&
+        y >= noseMinY && y <= noseMaxY && z > frontZ;
+      if (!noseTriangle) kept.push(ia, ib, ic);
+    }
+    if (kept.length === indexCount) return;
+
+    const original = mesh.geometry;
+    const trimmed = original.clone();
+    trimmed.setIndex(kept);
+    mesh.geometry = trimmed;
+    restorations.push({ mesh, geometry: original });
+  });
+
+  return () => {
+    for (const { mesh, geometry } of restorations) {
+      mesh.geometry.dispose();
+      mesh.geometry = geometry;
+    }
+  };
 }
 
 function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
