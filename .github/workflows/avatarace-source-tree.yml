@@ -56,6 +56,9 @@ jobs:
                 "https://raw.githubusercontent.com/Mtman1987/3davatar/main/$model" \
                 --output "$target"
             fi
+            if [ ! -s "$target" ] && [ "$model" = "neon-gamer-facial-v2.glb" ] && [ -s "neon-gamer-facial-poc.glb" ]; then
+              cp neon-gamer-facial-poc.glb "$target"
+            fi
             if [ ! -s "$target" ]; then
               found="$(find "$RUNNER_TEMP/avatarace-unpacked" -type f -name "$model" -size +1k -print -quit)"
               if [ -n "$found" ]; then cp "$found" "$target"; fi
@@ -68,7 +71,7 @@ jobs:
             cp avatarace-patch/face-builder-browser.js public/avatarace-patch/face-builder-browser.js
           fi
 
-          rm -f grok-workspace.zip male-base-mesh-base_male.glb female-base-mesh-base_female.glb neon-gamer-facial-v2.glb
+          rm -f grok-workspace.zip male-base-mesh-base_male.glb female-base-mesh-base_female.glb neon-gamer-facial-v2.glb neon-gamer-facial-poc.glb
           rm -rf avatarace-patch attachments screenshots handoff artifacts .grok
           test -f package.json
           echo "Source files restored; all three non-empty required GLBs are in public/models."
