@@ -148,7 +148,16 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       const finalBounds=new THREE.Box3().setFromObject(root);const finalSize=finalBounds.getSize(new THREE.Vector3());
       root.position.x-=center.x;root.position.z-=center.z;
       const target=new THREE.Vector3(0,finalBounds.min.y+finalSize.y*0.52,0);
-      camera.position.set(target.x+0.15,target.y+0.12,Math.max(finalSize.y*1.45,0.45));camera.lookAt(target);
+      // Fit the complete avatar into the actual viewport. Multiplying height by
+      // 1.45 clipped the head and feet at the 30° camera FOV, hiding the photo
+      // face even when detection and placement had succeeded.
+      const verticalFov=THREE.MathUtils.degToRad(camera.fov);
+      const horizontalFov=2*Math.atan(Math.tan(verticalFov*0.5)*Math.max(camera.aspect,0.01));
+      const fitHeight=finalSize.y/(2*Math.tan(verticalFov*0.5));
+      const fitWidth=finalSize.x/(2*Math.tan(horizontalFov*0.5));
+      const fitDepth=finalSize.z/(2*Math.tan(verticalFov*0.5));
+      const fitDistance=Math.max(fitHeight,fitWidth,fitDepth,0.45)*1.14;
+      camera.position.set(target.x+0.08,target.y+0.04,fitDistance);camera.lookAt(target);
       const clips=gltf.animations ?? [];const mixer=clips.length?new THREE.AnimationMixer(root):null;
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
