@@ -439,7 +439,7 @@ function Studio({
           <button type="button" className="pointer-events-auto grid size-11 place-items-center rounded-full bg-surface/90 text-fg" onClick={onBack} aria-label="Back">
             <ChevronLeft className="size-5" />
           </button>
-          <p className="rounded-full bg-surface/90 px-3 py-1 text-xs tracking-wide text-muted">Drag to turn</p>
+          <p className="rounded-full bg-surface/90 px-3 py-1 text-xs tracking-wide text-muted">1 finger: turn · 2 fingers: move / zoom</p>
           <span className="size-11" />
         </div>
         {state.status === "working" ? (
