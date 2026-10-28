@@ -1,0 +1,50 @@
+name: Avatar viewer camera smoke test
+
+on:
+  push:
+    branches:
+      - experiment/mediapipe-face-pipeline
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  camera-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start local app
+        env:
+          VITE_AUTH_ENABLED: "false"
+        run: |
+          npm run dev > /tmp/avatarace-vite.log 2>&1 &
+          echo $! > /tmp/avatarace-vite.pid
+          for i in $(seq 1 90); do
+            if curl --silent --fail http://127.0.0.1:8080/ >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/avatarace-vite.log
+          exit 1
+      - name: Exercise viewer camera and capture screenshots
+        run: npx playwright test tests/viewer-camera.smoke.spec.ts
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatarace-camera-smoke
+          path: |
+            test-results/
+            playwright-report/
+            /tmp/avatarace-vite.log
+          if-no-files-found: warn
+          retention-days: 7
