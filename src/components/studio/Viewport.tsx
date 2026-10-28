@@ -394,8 +394,11 @@ function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const data = image.data;
   const cx = canvas.width * 0.5, cy = canvas.height * 0.5;
-  const rx = canvas.width * 0.365, ry = canvas.height * 0.39;
-  const feather = 0.075;
+  // The face mesh follows the landmark oval, which is narrower than the
+  // square crop. Feather against that actual face footprint; the old broad
+  // ellipse stayed fully opaque at the jaw and left a visible mask edge.
+  const rx = canvas.width * 0.31, ry = canvas.height * 0.35;
+  const feather = 0.14;
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
