@@ -218,7 +218,14 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
-    faceMesh.scale.setScalar(props.headScale / rootScale);
+    // The base GLB keeps its own skull/jaw underneath this photo-only surface.
+    // Match the head's vertical reach without widening the cheeks; uniform
+    // scaling left the original chin visible below the captured face like a mask.
+    faceMesh.scale.set(
+      props.headScale / rootScale,
+      (props.headScale * 1.1) / rootScale,
+      props.headScale / rootScale,
+    );
 
     // Place the photo face from the actual head joint, not the whole body's
     // bounding-box front edge (which can be dominated by shoulders/arms).
