@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import type { ArkitName, Weights } from "@/lib/avatar/arkit";
+import type { Weights } from "@/lib/avatar/arkit";
 import { bodyUrl, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
