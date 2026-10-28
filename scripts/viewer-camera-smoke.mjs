@@ -47,10 +47,23 @@ try {
   // A visible canvas alone is not enough: don't screenshot until MediaPipe has
   // actually completed and enabled the face presets. This validates the real
   // photo pipeline instead of capturing an empty or still-loading viewer.
-  await page.waitForFunction(() => {
-    const standard = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Standard");
-    return standard instanceof HTMLButtonElement && !standard.disabled;
-  }, null, { timeout: 90_000 });
+  try {
+    await page.waitForFunction(() => {
+      const standard = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Standard");
+      return standard instanceof HTMLButtonElement && !standard.disabled;
+    }, null, { timeout: 90_000 });
+  } catch (error) {
+    await page.screenshot({ path: `${output}/failure-face-pipeline.png`, fullPage: true }).catch(() => {});
+    await writeFile(`${output}/face-pipeline-diagnostics.json`, JSON.stringify({
+      url: page.url(),
+      title: await page.title().catch(() => ""),
+      bodyText: await page.locator("body").innerText().catch(() => ""),
+      pageErrors: errors,
+      network: network.slice(-150),
+      failure: String(error)
+    }, null, 2));
+    throw error;
+  }
 
   const results = [];
   for (const body of ["Male", "Female"]) {
