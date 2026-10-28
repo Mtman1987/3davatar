@@ -249,6 +249,23 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     targetWorld.z += height * (0.035 + 3 / 72) + props.headZ;
     const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
     faceMesh.position.copy(targetLocal);
+
+    // Normalize photo roll from the detected eye line before attaching the
+    // photo surface to the head. Without this, a slightly tilted source photo
+    // leaves one eye beyond the mask even though the face center is aligned.
+    // MediaPipe's image Y points down; the generated mesh uses Y-up, so this
+    // sign levels the 3D eye line while keeping texture UVs and landmarks paired.
+    const leftEye = [33, 133].map((index) => built.positions.slice(index * 3, index * 3 + 3));
+    const rightEye = [263, 362].map((index) => built.positions.slice(index * 3, index * 3 + 3));
+    const eyeCenter = (points: Float32Array[]) => new THREE.Vector3(
+      points.reduce((sum, point) => sum + point[0]!, 0) / points.length,
+      points.reduce((sum, point) => sum + point[1]!, 0) / points.length,
+      points.reduce((sum, point) => sum + point[2]!, 0) / points.length,
+    );
+    const eyeA = eyeCenter(leftEye);
+    const eyeB = eyeCenter(rightEye);
+    const eyeLineAngle = Math.atan2(eyeB.y - eyeA.y, eyeB.x - eyeA.x);
+    faceMesh.rotation.z = -eyeLineAngle;
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
     faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
