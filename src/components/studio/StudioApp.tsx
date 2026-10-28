@@ -465,7 +465,7 @@ function Studio({
             <SavePanel note={saveNote} onDownload={() => void download()} onKeep={() => void keep()} />
           ) : null}
         </div>
-        <nav className="grid grid-cols-5 border-t border-border">
+        <nav className="grid grid-cols-6 border-t border-border">
           {PANELS.map((panel) => {
             const Icon = panel.icon;
             const on = state.panel === panel.id;
