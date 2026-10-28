@@ -301,22 +301,30 @@ function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
 function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
   const context = source.getContext("2d");
   if (!context || source.width < 8 || source.height < 8) return null;
-  const x0 = Math.floor(source.width * 0.34), x1 = Math.floor(source.width * 0.66);
-  const y0 = Math.floor(source.height * 0.38), y1 = Math.floor(source.height * 0.66);
-  const pixels = context.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+  // Sample both cheek zones rather than the center of the face, where nose,
+  // lips, nostrils, and shadows can bias the body's skin color much darker.
+  const patches = [
+    { x: 0.27, y: 0.40, w: 0.18, h: 0.20 },
+    { x: 0.55, y: 0.40, w: 0.18, h: 0.20 },
+  ];
   let r = 0, g = 0, b = 0, count = 0;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const rr = pixels[i]!, gg = pixels[i + 1]!, bb = pixels[i + 2]!;
-    const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);
-    // Ignore transparent, near-black, and highly saturated background pixels.
-    if (pixels[i + 3]! < 200 || max < 48 || max - min > 105) continue;
-    r += rr; g += gg; b += bb; count++;
+  for (const patch of patches) {
+    const x = Math.floor(source.width * patch.x);
+    const y = Math.floor(source.height * patch.y);
+    const width = Math.max(1, Math.floor(source.width * patch.w));
+    const height = Math.max(1, Math.floor(source.height * patch.h));
+    const pixels = context.getImageData(x, y, width, height).data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const rr = pixels[i]!, gg = pixels[i + 1]!, bb = pixels[i + 2]!;
+      const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);
+      // Ignore transparent, near-black, and highly saturated background pixels.
+      if (pixels[i + 3]! < 200 || max < 48 || max - min > 105) continue;
+      r += rr; g += gg; b += bb; count++;
+    }
   }
   if (count < 20) return null;
-  const tone = new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
-  // Keep a little headroom so the body does not inherit a photo's strongest highlight.
-  tone.multiplyScalar(0.92);
-  return tone;
+  // Do not darken the sampled tone further; keep the cheek average as the target.
+  return new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
 }
 
 function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
