@@ -386,7 +386,7 @@ function Studio({
       createdAt: Date.now(),
       title: snap.modelName ?? `${labelOf(BODY_ASSETS, snap.bodyAsset)} · ${labelOf(OUTFITS, snap.outfit)}`,
       thumb,
-      photo: getPendingPhoto(),
+      photo: snap.modelUrl ? null : getPendingPhoto(),
       bodyAsset: snap.bodyAsset,
       modelUrl: snap.modelUrl,
       modelName: snap.modelName,
@@ -840,7 +840,16 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
     expression: item.expression,
     error: null,
   });
-  if (!item.photo) return;
-  const res = await fetch(item.photo);
-  await takePhoto(await res.blob());
+  if (!item.photo || hasFinishedModel) return;
+  try {
+    const res = await fetch(item.photo);
+    if (!res.ok) throw new Error("The saved photo is no longer available.");
+    await takePhoto(await res.blob());
+  } catch {
+    useStudio.getState().patch({
+      status: "error",
+      statusText: "",
+      error: "This saved avatar's photo could not be restored. Its saved settings are still available.",
+    });
+  }
 }
