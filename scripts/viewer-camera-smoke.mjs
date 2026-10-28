@@ -9,26 +9,19 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 1, reducedMotion: "reduce" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("http://127.0.0.1:8080/", { waitUntil: "commit", timeout: 15_000 });
-
-  // Wait for layout/font settling before interacting with the home screen. The page can
-  // otherwise keep shifting while Playwright is trying to establish a stable click target.
-  await page.evaluate(() => document.fonts.ready);
-  // Apply the actual sample portrait from the home screen; this exercises face detection/fitting.
-  const sampleButton = page.getByRole("button", { name: /try the sample portrait/i });
-  await sampleButton.waitFor({ state: "visible", timeout: 30_000 });
-  await sampleButton.scrollIntoViewIfNeeded();
-  await sampleButton.click({ timeout: 60_000 });
-  await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 60_000 });
-  await page.waitForFunction(() => document.querySelector("canvas")?.getBoundingClientRect().width > 0, null, { timeout: 30_000 });
-  await page.waitForTimeout(3000);
+  // Test-only query flag enters the actual sample-photo pipeline on app mount. No home-screen
+  // button lookup or click is needed, so the test starts the useful work immediately.
+  await page.goto("http://127.0.0.1:8080/?cameraSmoke=1", { waitUntil: "domcontentloaded", timeout: 10_000 });
+  await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 25_000 });
+  await page.waitForFunction(() => document.querySelector("canvas")?.getBoundingClientRect().width > 0, null, { timeout: 20_000 });
+  await page.waitForFunction(() => document.querySelector("[role=status]")?.textContent?.includes("Finding your face") !== true, null, { timeout: 20_000 });
 
   const results = [];
   for (const body of ["Male", "Female"]) {
     await page.getByRole("button", { name: "Body", exact: true }).click();
     await page.getByRole("button", { name: new RegExp("^" + body + "$") }).click();
     await page.getByRole("button", { name: "Face", exact: true }).click();
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(1000);
     const path = `${output}/sample-face-fit-${body.toLowerCase()}.png`;
     await page.screenshot({ path, fullPage: true });
     results.push({ body, screenshot: path, canvasVisible: await page.locator("canvas").first().isVisible() });
@@ -37,7 +30,7 @@ try {
   await writeFile(`${output}/face-fit-summary.json`, JSON.stringify({
     test: "sample photo face fit on generic male and female avatar bodies",
     results,
-    facePipelineUsed: "home-screen Try the sample portrait",
+    facePipelineUsed: "cameraSmoke query auto-starts the same sample portrait pipeline",
     pageErrors: errors,
     verdict: "Screenshots require visual inspection to determine whether the face is seated or floating."
   }, null, 2));
