@@ -5,6 +5,7 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
+import { applyRiggedWardrobe } from "@/lib/avatar/wardrobe";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
@@ -120,6 +121,14 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     });
     return ()=>{cancelled=true;};
   },[props.modelUrl,props.bodyAsset,props.modelName]);
+
+  useEffect(() => {
+    // The generic male/female bodies get a separate, rig-attached closet.
+    // Never layer wardrobe pieces onto the finished commissioned model.
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl) return;
+    return applyRiggedWardrobe(loaded.root, props.bodyAsset, props.outfit, props.hair);
+  }, [props.outfit, props.hair, props.bodyAsset, props.modelUrl, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
