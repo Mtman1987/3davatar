@@ -1,5 +1,5 @@
 import type { BodyId, FaceChoice, HairId, OutfitId, SkinId } from "@/lib/avatar/constants";
-import type { FaceFitSnapshot } from "@/lib/avatar/face-fit";
+import { isFaceFitSnapshot, type FaceFitSnapshot } from "@/lib/avatar/face-fit";
 
 export type SavedAvatar = {
   id: string;
@@ -84,7 +84,7 @@ export async function listAvatars(): Promise<SavedAvatar[]> {
             headY: typeof row.headY === "number" && Number.isFinite(row.headY) ? row.headY : 0,
             headZ: typeof row.headZ === "number" && Number.isFinite(row.headZ) ? row.headZ : 0,
             expression: typeof row.expression === "number" && Number.isFinite(row.expression) ? row.expression : 1,
-            faceFit: row.faceFit && typeof row.faceFit === "object" && (row.faceFit as FaceFitSnapshot).version === 1 ? row.faceFit as FaceFitSnapshot : null,
+            faceFit: isFaceFitSnapshot(row.faceFit) ? row.faceFit : null,
           };
         })
         .filter((row): row is SavedAvatar => row !== null)
