@@ -6,13 +6,19 @@ const output = "test-results";
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 1, reducedMotion: "reduce" });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("http://127.0.0.1:8080/", { waitUntil: "commit", timeout: 15_000 });
 
+  // Wait for layout/font settling before interacting with the home screen. The page can
+  // otherwise keep shifting while Playwright is trying to establish a stable click target.
+  await page.evaluate(() => document.fonts.ready);
   // Apply the actual sample portrait from the home screen; this exercises face detection/fitting.
-  await page.getByRole("button", { name: /try the sample portrait/i }).click();
+  const sampleButton = page.getByRole("button", { name: /try the sample portrait/i });
+  await sampleButton.waitFor({ state: "visible", timeout: 30_000 });
+  await sampleButton.scrollIntoViewIfNeeded();
+  await sampleButton.click({ timeout: 60_000 });
   await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 60_000 });
   await page.waitForFunction(() => document.querySelector("canvas")?.getBoundingClientRect().width > 0, null, { timeout: 30_000 });
   await page.waitForTimeout(3000);
