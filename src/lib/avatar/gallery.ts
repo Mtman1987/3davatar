@@ -6,7 +6,9 @@ export type SavedAvatar = {
   title: string;
   thumb: string;
   photo: string | null;
-  body: BodyId;
+  bodyAsset: BodyId;
+  /** Legacy IndexedDB records created before real body assets were introduced. */
+  body?: string;
   outfit: OutfitId;
   hair: HairId;
   skin: SkinId;

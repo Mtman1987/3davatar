@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from "react";
 import {
   AudioLines,
+  Box,
   Camera,
   Check,
   ChevronLeft,
@@ -15,7 +16,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import { BODIES, HAIR, OUTFITS, SKINS, VOICES, labelOf, type Panel } from "@/lib/avatar/constants";
+import { BODY_ASSETS, FINISHED_MODEL_URL, FINISHED_MODEL_NAME, HAIR, OUTFITS, SKINS, VOICES, labelOf, type Panel } from "@/lib/avatar/constants";
 import { deleteAvatar, getPendingPhoto, listAvatars, saveAvatar, setPendingPhoto, type SavedAvatar } from "@/lib/avatar/gallery";
 import { speakLine } from "@/lib/avatar/speak";
 import { scriptWeights, Sound2Face } from "@/lib/avatar/sound2face";
@@ -24,6 +25,7 @@ import { Viewport, type ViewportHandle } from "@/components/studio/Viewport";
 
 const PANELS: { id: Panel; label: string; icon: typeof UserRound }[] = [
   { id: "body", label: "Body", icon: UserRound },
+  { id: "finished", label: "Finished", icon: Box },
   { id: "look", label: "Look", icon: Shirt },
   { id: "face", label: "Face", icon: Smile },
   { id: "voice", label: "Voice", icon: AudioLines },
@@ -107,6 +109,7 @@ export function StudioApp() {
           onLibrary={() => libraryRef.current?.click()}
           onSample={() => void useSample()}
           onBrowse={() => patch({ screen: "studio", panel: "body", error: null, status: "idle" })}
+          onFinished={() => patch({ screen: "studio", panel: "finished", modelUrl: FINISHED_MODEL_URL, modelName: FINISHED_MODEL_NAME, status: "working", statusText: "Loading commissioned model…", error: null })}
           onSaved={() => patch({ screen: "library" })}
         />
       ) : null}
@@ -144,6 +147,7 @@ function Home({
   onLibrary,
   onSample,
   onBrowse,
+  onFinished,
   onSaved,
 }: {
   savedCount: number;
@@ -151,13 +155,14 @@ function Home({
   onLibrary: () => void;
   onSample: () => void;
   onBrowse: () => void;
+  onFinished: () => void;
   onSaved: () => void;
 }) {
   return (
     <div className="weave safe-top safe-bottom min-h-dvh">
       <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-5 pb-8">
         <header className="flex items-center justify-between py-4">
-          <p className="text-xs font-medium tracking-[0.22em] text-muted uppercase">StreamWeaver</p>
+          <p className="text-xs font-medium tracking-[0.22em] text-muted uppercase">AvatarAce</p>
           <button type="button" className="text-sm text-fg" onClick={onSaved}>
             Saved{savedCount ? ` ${savedCount}` : ""}
           </button>
@@ -178,6 +183,9 @@ function Home({
             </button>
             <button type="button" className="h-12 rounded-full text-muted" onClick={onBrowse}>
               Browse the studio first
+            </button>
+            <button type="button" className="h-12 rounded-full border border-primary text-primary" onClick={onFinished}>
+              Load finished commission
             </button>
             <button type="button" className="h-12 text-sm text-accent" onClick={onSample}>
               Try the sample portrait
@@ -271,6 +279,9 @@ function Studio({
   const viewRef = useRef<ViewportHandle>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [showPhoneVoice, setShowPhoneVoice] = useState(false);
+  const [animationIndex, setAnimationIndex] = useState(0);
+  const [animationPlaying, setAnimationPlaying] = useState(false);
+  const [morphWeights, setMorphWeights] = useState<Record<string, number>>({});
 
   async function speakAi() {
     const engine = engineRef.current;
@@ -373,10 +384,10 @@ function Studio({
     await saveAvatar({
       id: crypto.randomUUID(),
       createdAt: Date.now(),
-      title: `${labelOf(BODIES, snap.body)} · ${labelOf(OUTFITS, snap.outfit)}`,
+      title: snap.modelName ?? `${labelOf(BODY_ASSETS, snap.bodyAsset)} · ${labelOf(OUTFITS, snap.outfit)}`,
       thumb,
       photo: getPendingPhoto(),
-      body: snap.body,
+      bodyAsset: snap.bodyAsset,
       outfit: snap.outfit,
       hair: snap.hair,
       skin: snap.skin,
@@ -395,7 +406,15 @@ function Studio({
       <div className="relative min-h-0 flex-1 bg-bg">
         <Viewport
           ref={viewRef}
-          body={state.body}
+          bodyAsset={state.bodyAsset}
+          modelUrl={state.modelUrl}
+          modelName={state.modelName}
+          sampleTracking={() => null}
+          animationIndex={animationIndex}
+          animationPlaying={animationPlaying}
+          manualMorphs={morphWeights}
+          onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); setMorphWeights({}); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
+          onError={(msg) => { if (msg) state.patch({ status: "error", statusText: "", error: msg }); }}
           outfit={state.outfit}
           hair={state.hair}
           skin={state.skin}
@@ -429,6 +448,7 @@ function Studio({
       <section className="safe-bottom flex max-h-[52dvh] flex-col border-t border-border bg-surface lg:max-h-none lg:border-t-0 lg:border-l">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {state.panel === "body" ? <BodyPanel /> : null}
+          {state.panel === "finished" ? <FinishedPanel animationIndex={animationIndex} onAnimationChange={setAnimationIndex} animationPlaying={animationPlaying} onToggleAnimation={() => setAnimationPlaying((playing) => !playing)} morphWeights={morphWeights} onMorphChange={(name, value) => setMorphWeights((current) => ({ ...current, [name]: value }))} onResetMorphs={() => setMorphWeights(Object.fromEntries(state.morphNames.map((name) => [name, 0])))} /> : null}
           {state.panel === "look" ? <LookPanel /> : null}
           {state.panel === "face" ? (
             <FacePanel onCamera={onCamera} onLibrary={onLibrary} onSample={onSample} />
@@ -446,7 +466,7 @@ function Studio({
             <SavePanel note={saveNote} onDownload={() => void download()} onKeep={() => void keep()} />
           ) : null}
         </div>
-        <nav className="grid grid-cols-5 border-t border-border">
+        <nav className="grid grid-cols-6 border-t border-border">
           {PANELS.map((panel) => {
             const Icon = panel.icon;
             const on = state.panel === panel.id;
@@ -469,18 +489,65 @@ function Studio({
 }
 
 function BodyPanel() {
-  const body = useStudio((s) => s.body);
+  const bodyAsset = useStudio((s) => s.bodyAsset);
+  const modelUrl = useStudio((s) => s.modelUrl);
   const patch = useStudio((s) => s.patch);
   return (
     <div>
       <h2 className="font-display text-xl text-fg">Choose a body</h2>
       <div className="mt-3 grid grid-cols-2 gap-2">
-        {BODIES.map((item) => (
-          <Choice key={item.id} on={body === item.id} label={item.label} note={item.note} onClick={() => patch({ body: item.id })} />
+        {BODY_ASSETS.map((item) => (
+          <Choice key={item.id} on={bodyAsset === item.id && !modelUrl} label={item.label} note={item.note} onClick={() => patch({ bodyAsset: item.id, modelUrl: null, modelName: null, status: "working", statusText: "Loading base model…", error: null })} />
         ))}
       </div>
     </div>
   );
+}
+
+function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, onToggleAnimation, morphWeights, onMorphChange, onResetMorphs }: {
+  animationIndex: number;
+  onAnimationChange: (index: number) => void;
+  animationPlaying: boolean;
+  onToggleAnimation: () => void;
+  morphWeights: Record<string, number>;
+  onMorphChange: (name: string, value: number) => void;
+  onResetMorphs: () => void;
+}) {
+  const state = useStudio();
+  return <div className="space-y-3">
+    <h2 className="font-display text-xl text-fg">Finished commission</h2>
+    <p className="text-sm text-muted">Load the exact commissioned GLB with its embedded morph targets and animation clips.</p>
+    <button type="button" className="h-12 w-full rounded-full bg-primary font-medium text-primary-fg" onClick={() => state.patch({ modelUrl: FINISHED_MODEL_URL, modelName: FINISHED_MODEL_NAME, status: "working", statusText: "Loading commissioned model…", error: null })}>Load finished commission</button>
+    <button type="button" className="h-11 w-full rounded-full border border-border" onClick={() => state.patch({ modelUrl: null, modelName: null, bodyAsset: "male", status: "working", statusText: "Loading male base…", error: null, panel: "body" })}>Back to male base</button>
+    {state.error ? <p role="alert" className="text-sm text-red-400">{state.error}</p> : null}
+    <p className="text-xs text-muted">Morph targets: {state.morphNames.length} · Animations: {state.animationNames.length}</p>
+    {state.animationNames.length ? (
+      <div className="space-y-2">
+        <label className="block text-xs text-muted" htmlFor="commission-animation">Embedded animation</label>
+        <select id="commission-animation" className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg" value={Math.min(animationIndex, state.animationNames.length - 1)} onChange={(event) => onAnimationChange(Number(event.target.value))}>
+          {state.animationNames.map((name, index) => <option key={index} value={index}>{name}</option>)}
+        </select>
+        <button type="button" className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
+      </div>
+    ) : null}
+    {state.morphNames.length ? (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-fg">Facial morph targets</h3>
+          <button type="button" className="text-xs text-accent" onClick={onResetMorphs}>Reset all</button>
+        </div>
+        <p className="text-xs text-muted">Adjust a morph to preview it on the actual loaded model.</p>
+        <div className="max-h-56 space-y-3 overflow-y-auto rounded-xl border border-border p-3">
+          {state.morphNames.map((name) => (
+            <label key={name} className="block space-y-1">
+              <span className="flex justify-between gap-2 text-xs text-muted"><span className="truncate">{name}</span><span>{(morphWeights[name] ?? 0).toFixed(2)}</span></span>
+              <input aria-label={name} className="w-full" type="range" min="0" max="1" step="0.01" value={morphWeights[name] ?? 0} onChange={(event) => onMorphChange(name, Number(event.target.value))} />
+            </label>
+          ))}
+        </div>
+      </div>
+    ) : null}
+  </div>;
 }
 
 function LookPanel() {
@@ -744,7 +811,9 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
   useStudio.getState().patch({
     screen: "studio",
     panel: "face",
-    body: item.body,
+    bodyAsset: item.bodyAsset ?? (item.body === "female" ? "female" : "male"),
+    modelUrl: null,
+    modelName: null,
     outfit: item.outfit,
     hair: item.hair,
     skin: item.skin,

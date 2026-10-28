@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import type { BodyId, HairId, OutfitId, SkinId } from "@/lib/avatar/constants";
+import type { HairId, OutfitId, SkinId } from "@/lib/avatar/constants";
+type LegacyProceduralBodyId = "slim" | "balanced" | "athletic" | "solid";
 
 const SKIN: Record<SkinId, string> = {
   porcelain: "#f2d3c4",
@@ -9,7 +10,7 @@ const SKIN: Record<SkinId, string> = {
   deep: "#4b2e1f",
 };
 
-const SPECS: Record<BodyId, { shoulder: number; waist: number; hip: number; arm: number; leg: number }> = {
+const SPECS: Record<LegacyProceduralBodyId, { shoulder: number; waist: number; hip: number; arm: number; leg: number }> = {
   slim: { shoulder: 0.16, waist: 0.11, hip: 0.135, arm: 0.038, leg: 0.052 },
   balanced: { shoulder: 0.19, waist: 0.135, hip: 0.16, arm: 0.046, leg: 0.06 },
   athletic: { shoulder: 0.23, waist: 0.15, hip: 0.165, arm: 0.056, leg: 0.064 },
@@ -24,7 +25,7 @@ const CLOTH: Record<OutfitId, string> = {
   layers: "#243028",
 };
 
-export function buildCharacter(options: { body: BodyId; outfit: OutfitId; hair: HairId; skin: SkinId }) {
+export function buildCharacter(options: { body: LegacyProceduralBodyId; outfit: OutfitId; hair: HairId; skin: SkinId }) {
   const spec = SPECS[options.body];
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -111,7 +112,7 @@ export function buildCharacter(options: { body: BodyId; outfit: OutfitId; hair: 
   return root;
 }
 
-function torsoGeometry(spec: (typeof SPECS)[BodyId], h: number) {
+function torsoGeometry(spec: (typeof SPECS)[LegacyProceduralBodyId], h: number) {
   const pts = [
     new THREE.Vector2(spec.hip * 0.72, 0),
     new THREE.Vector2(spec.hip, h * 0.14),
@@ -128,7 +129,7 @@ function addOutfit(
   head: THREE.Group,
   root: THREE.Group,
   outfit: OutfitId,
-  spec: (typeof SPECS)[BodyId],
+  spec: (typeof SPECS)[LegacyProceduralBodyId],
   torsoH: number,
   hipY: number,
   geo: <T extends THREE.BufferGeometry>(g: T) => T,

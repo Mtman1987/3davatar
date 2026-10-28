@@ -1,6 +1,12 @@
 name: Validate AvatarAce source tree
 
 on:
+  push:
+    branches:
+      - feat/no-procedural-finished-runtime
+  pull_request:
+    branches:
+      - work/avatarace-source-tree
   workflow_dispatch:
 
 permissions:
@@ -10,10 +16,8 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out working branch
+      - name: Check out tested commit
         uses: actions/checkout@v4
-        with:
-          ref: work/avatarace-source-tree
       - name: Validate required assets without substituting models
         shell: bash
         run: |
@@ -29,9 +33,10 @@ jobs:
           expected="ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba"
           test "$actual" = "$expected" || { echo "::error::V2 SHA-256 mismatch: $actual"; exit 1; }
           echo "Verified commissioned V2 asset SHA-256: $actual"
-      - name: Install dependencies and build
+      - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run typecheck
           npm run build
