@@ -485,13 +485,14 @@ function Studio({
 
 function BodyPanel() {
   const bodyAsset = useStudio((s) => s.bodyAsset);
+  const modelUrl = useStudio((s) => s.modelUrl);
   const patch = useStudio((s) => s.patch);
   return (
     <div>
       <h2 className="font-display text-xl text-fg">Choose a body</h2>
       <div className="mt-3 grid grid-cols-2 gap-2">
         {BODY_ASSETS.map((item) => (
-          <Choice key={item.id} on={bodyAsset === item.id && !useStudio.getState().modelUrl} label={item.label} note={item.note} onClick={() => patch({ bodyAsset: item.id, modelUrl: null, modelName: null, status: "working", statusText: "Loading base model…", error: null })} />
+          <Choice key={item.id} on={bodyAsset === item.id && !modelUrl} label={item.label} note={item.note} onClick={() => patch({ bodyAsset: item.id, modelUrl: null, modelName: null, status: "working", statusText: "Loading base model…", error: null })} />
         ))}
       </div>
     </div>
