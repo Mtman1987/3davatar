@@ -184,8 +184,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       (bounds.min.z + bounds.max.z) * 0.5,
     );
     const targetWorld = headWorld.clone();
-    targetWorld.y += height * 0.045 + props.headY;
-    targetWorld.z += height * 0.035 + props.headZ;
+    // The normalized base body is about 2 viewer units tall (roughly 72 inches).
+    // Apply the requested fit adjustment: 1 inch lower and 3 inches forward,
+    // while retaining the interactive fine-tuning sliders.
+    targetWorld.y += height * (0.045 - 1 / 72) + props.headY;
+    targetWorld.z += height * (0.035 + 3 / 72) + props.headZ;
     const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
     faceMesh.position.copy(targetLocal);
     faceMesh.renderOrder = 2;
