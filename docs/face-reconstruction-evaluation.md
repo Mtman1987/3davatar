@@ -8,7 +8,8 @@ Compare the current AvatarAce face builder, the MediaPipe Face Mesh demo, and a 
 
 - `src/lib/avatar/detect.ts` loads the existing `@mediapipe/tasks-vision` Face Landmarker.
 - The detector returns facial landmarks and blendshape categories. This branch also requests the facial transformation matrix and retains the result metadata with the cached standard/detail face builds.
-- `src/lib/avatar/build-face.ts` creates the current photo-textured mesh and ARKit morph targets.
+- `src/lib/avatar/mediapipe-topology.ts` contains the attributed canonical MediaPipe topology (468 vertices / 898 triangles).
+- `src/lib/avatar/build-face.ts` uses those authored triangles for full Face Landmarker results instead of generating new triangles with 2D Delaunay. Photo-derived UVs and the existing ARKit morph-target generation remain in place.
 - The existing male/female body viewer remains the integration target; the comparison harness must not replace its body rig, animations, or morph targets.
 
 ## Same-image comparison
@@ -37,11 +38,12 @@ Keep screenshots and results side by side. Do not select a winner from a single 
 
 ## MediaPipe output retained by this branch
 
-The pipeline now requests:
-- 3D face landmarks
-- face blendshape scores
-- facial transformation matrix
+The pipeline now retains:
+- all detected 3D face landmarks (normally 478)
+- face blendshape scores (normally 52)
+- the facial transformation matrix and its dimensions
 - source image dimensions and aspect ratio
+- the canonical 468-point / 898-triangle surface topology used to build the mesh
 
 This is diagnostic data for the fit/evaluation pipeline. It is deliberately retained separately from the rendered mesh so we can validate the coordinate conventions before using the transform to alter placement or orientation.
 
