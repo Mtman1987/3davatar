@@ -36,7 +36,7 @@ jobs:
           cat /tmp/avatarace-vite.log
           exit 1
       - name: Exercise viewer camera and capture screenshots
-        run: npx playwright test tests/viewer-camera.smoke.spec.ts
+        run: node scripts/viewer-camera-smoke.mjs
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
