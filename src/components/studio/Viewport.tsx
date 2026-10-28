@@ -69,7 +69,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       frame=requestAnimationFrame(loop); const delta=clock.getDelta(); const loaded=modelRef.current; loaded?.mixer?.update(delta);
       const current=propsRef.current; const sound=current.sampleSound(); const tracking=current.sampleTracking?.();
       const allWeights: Record<string,number> = {...(sound ?? {}),...(tracking ?? {}),...(current.manualMorphs ?? {})};
-      if (loaded && Object.keys(allWeights).length) applyMorphs(loaded.root,allWeights,current.expression);
+      if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       renderer.render(scene,camera);
     };
     loop();setBooted(n=>n+1);
@@ -126,7 +126,7 @@ function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expre
   root.traverse((obj)=>{
     const mesh=obj as THREE.Mesh;if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
     for(const [name,index] of Object.entries(mesh.morphTargetDictionary)){
-      const value=weights[name]; if(value!==undefined)mesh.morphTargetInfluences[index]=clamp(value*expression,0,1);
+      const value=weights[name] ?? 0; mesh.morphTargetInfluences[index]=clamp(value*expression,0,1);
     }
   });
 }
