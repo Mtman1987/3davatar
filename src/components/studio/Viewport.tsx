@@ -207,7 +207,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
     const bounds = new THREE.Box3().setFromObject(loaded.root);
     const height = Math.max(0.001, bounds.max.y - bounds.min.y);
-    const textureCanvas = makeFeatheredFaceTexture(built.texture);
+    const textureCanvas = makeFeatheredFaceTexture(built.texture, built.uvs);
     const map = new THREE.CanvasTexture(textureCanvas);
     map.colorSpace = THREE.SRGBColorSpace;
     map.needsUpdate = true;
@@ -246,7 +246,10 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     // Apply the requested fit adjustment: 1 inch lower and 3 inches forward,
     // while retaining the interactive fine-tuning sliders.
     targetWorld.y += height * (0.045 - 1 / 72) + props.headY;
-    targetWorld.z += height * (0.035 + 3 / 72) + props.headZ;
+    // Keep the photo surface close to the skull. The former 0.035 + 3/72
+    // offset pushed it roughly 4.3 inches forward on a normalized 6-foot avatar,
+    // which made the reconstructed face read as a floating mask.
+    targetWorld.z += height * 0.015 + props.headZ;
     const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
     faceMesh.position.copy(targetLocal);
 
@@ -402,30 +405,52 @@ function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
   return new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
 }
 
-function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
+const PHOTO_FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+  152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+];
+
+function makeFeatheredFaceTexture(source: HTMLCanvasElement, uvs: Float32Array) {
   const canvas = document.createElement("canvas");
   canvas.width = source.width; canvas.height = source.height;
   const context = canvas.getContext("2d");
   if (!context) return source;
   context.drawImage(source, 0, 0);
-  const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  const data = image.data;
-  const cx = canvas.width * 0.5, cy = canvas.height * 0.5;
-  // The face mesh follows the landmark oval, which is narrower than the
-  // square crop. Feather against that actual face footprint; the old broad
-  // ellipse stayed fully opaque at the jaw and left a visible mask edge.
-  const rx = canvas.width * 0.31, ry = canvas.height * 0.35;
-  const feather = 0.14;
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width; x++) {
-      const i = (y * canvas.width + x) * 4;
-      const nx = (x - cx) / rx, ny = (y - cy) / ry;
-      const distance = Math.sqrt(nx * nx + ny * ny);
-      const alpha = THREE.MathUtils.clamp((1 + feather - distance) / feather, 0, 1);
-      data[i + 3] = Math.round(data[i + 3]! * alpha);
-    }
-  }
-  context.putImageData(image, 0, 0);
+
+  // Derive the alpha cut from the exact same canonical oval used by the face
+  // mesh, projected through its UVs. A fixed ellipse drifts relative to the
+  // photo crop and can leave opaque corners or cut into the jaw/temples.
+  const mask = document.createElement("canvas");
+  mask.width = canvas.width; mask.height = canvas.height;
+  const maskContext = mask.getContext("2d");
+  if (!maskContext) return canvas;
+  maskContext.fillStyle = "#fff";
+  maskContext.beginPath();
+  PHOTO_FACE_OVAL.forEach((index, pointIndex) => {
+    const u = uvs[index * 2];
+    const v = uvs[index * 2 + 1];
+    if (u === undefined || v === undefined) return;
+    const x = u * mask.width;
+    const y = (1 - v) * mask.height;
+    if (pointIndex === 0) maskContext.moveTo(x, y);
+    else maskContext.lineTo(x, y);
+  });
+  maskContext.closePath();
+  maskContext.fill();
+
+  // Blur only the cutout alpha so the base head skin can blend through the
+  // perimeter. The mesh boundary still defines the maximum face footprint.
+  const featherMask = document.createElement("canvas");
+  featherMask.width = canvas.width; featherMask.height = canvas.height;
+  const featherContext = featherMask.getContext("2d");
+  if (!featherContext) return canvas;
+  featherContext.filter = "blur(12px)";
+  featherContext.drawImage(mask, 0, 0);
+  featherContext.filter = "none";
+
+  context.globalCompositeOperation = "destination-in";
+  context.drawImage(featherMask, 0, 0);
+  context.globalCompositeOperation = "source-over";
   return canvas;
 }
 
