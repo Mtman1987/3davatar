@@ -416,6 +416,7 @@ function Studio({
       headY: snap.headY,
       headZ: snap.headZ,
       expression: snap.expression,
+      faceFit: viewRef.current?.captureFaceFit() ?? snap.faceFitSnapshot ?? null,
     });
     await refreshSaves();
     setSaveNote("Saved on this phone.");
@@ -451,6 +452,7 @@ function Studio({
           headZ={state.headZ}
           expression={state.expression}
           faceRev={state.faceRev}
+          faceFitSnapshot={state.faceFitSnapshot}
           sampleSound={() => engineRef.current?.sample() ?? null}
         />
         <div className="safe-top pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3">
