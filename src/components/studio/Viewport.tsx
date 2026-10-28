@@ -171,7 +171,13 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
       }
       if (!material.normalMap) {
         // Low-amplitude pore-scale normal detail, not a painted color texture.
-        const width = 96, height = 96, data = new Uint8Array(width * height * 4);
+        const width = 96, height = 96, canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) return material;
+        const image = context.createImageData(width, height);
+        const data = image.data;
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
             const i = (y * width + x) * 4;
@@ -182,7 +188,8 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
             data[i + 3] = 255;
           }
         }
-        const pores = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+        context.putImageData(image, 0, 0);
+        const pores = new THREE.CanvasTexture(canvas);
         pores.wrapS = THREE.RepeatWrapping;
         pores.wrapT = THREE.RepeatWrapping;
         pores.repeat.set(5, 5);
