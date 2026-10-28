@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
@@ -126,8 +127,83 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     // Wardrobe applies only to the generic base bodies; the commissioned model stays view-only.
     const loaded = modelRef.current;
     if (!loaded || props.modelUrl) return;
-    return applyRiggedWardrobe(loaded.root, props.bodyAsset, props.outfit, props.hair);
+    const useRealMaleTee = props.bodyAsset === "male" && props.outfit === "tee";
+    return applyRiggedWardrobe(loaded.root, props.bodyAsset, props.outfit, props.hair, useRealMaleTee);
   }, [props.outfit, props.hair, props.bodyAsset, props.modelUrl, booted]);
+
+  useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl || props.bodyAsset !== "male" || props.outfit !== "tee") return;
+    const root = loaded.root;
+    let cancelled = false;
+    const loader = new OBJLoader();
+    let shirtObject: THREE.Group | null = null;
+    loader.load("/models/clothing/male-shirt/crude_male_shirt.obj", (shirt) => {
+      if (cancelled || modelRef.current?.root !== root) {
+        disposeModel(shirt);
+        return;
+      }
+      shirt.name = "AvatarAceRealMaleTee";
+      const sourceBounds = new THREE.Box3().setFromObject(shirt);
+      root.updateMatrixWorld(true);
+      const bodyBounds = new THREE.Box3().setFromObject(root);
+      if (sourceBounds.isEmpty() || bodyBounds.isEmpty()) {
+        propsRef.current.onError?.("The male tee or base body has no usable geometry.");
+        disposeModel(shirt);
+        return;
+      }
+      const sourceSize = sourceBounds.getSize(new THREE.Vector3());
+      const sourceCenter = sourceBounds.getCenter(new THREE.Vector3());
+      const bodySize = bodyBounds.getSize(new THREE.Vector3());
+      if (sourceSize.y <= 0 || bodySize.y <= 0) {
+        propsRef.current.onError?.("Could not calculate male tee fit from garment and body bounds.");
+        disposeModel(shirt);
+        return;
+      }
+      const rootScale = Math.abs(root.getWorldScale(new THREE.Vector3()).y) || 1;
+      const scale = (bodySize.y * 0.40) / sourceSize.y / rootScale;
+      shirt.scale.setScalar(scale);
+      const target = new THREE.Vector3(
+        bodyBounds.getCenter(new THREE.Vector3()).x,
+        bodyBounds.min.y + bodySize.y * 0.72,
+        bodyBounds.getCenter(new THREE.Vector3()).z,
+      );
+      const local = root.worldToLocal(target.clone());
+      shirt.position.set(
+        local.x - sourceCenter.x * scale,
+        local.y - sourceCenter.y * scale,
+        local.z - sourceCenter.z * scale,
+      );
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x3b9eaa,
+        roughness: 0.88,
+        metalness: 0,
+        side: THREE.DoubleSide,
+      });
+      shirt.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.material = material;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      });
+      root.add(shirt);
+      root.updateMatrixWorld(true);
+      shirtObject = shirt;
+    }, undefined, (error) => {
+      if (!cancelled) {
+        const detail = error instanceof Error ? error.message : "Unknown OBJ loading error";
+        propsRef.current.onError?.("Failed to load the real male tee: " + detail);
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (shirtObject) {
+        shirtObject.parent?.remove(shirtObject);
+        disposeModel(shirtObject);
+      }
+    };
+  }, [props.outfit, props.bodyAsset, props.modelUrl, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
