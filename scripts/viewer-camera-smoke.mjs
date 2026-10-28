@@ -46,7 +46,14 @@ try {
     await page.getByRole("button", { name: "Body", exact: true }).click();
     await page.getByRole("button", { name: new RegExp("^" + body + "$") }).click();
     await page.getByRole("button", { name: "Face", exact: true }).click();
-    await page.waitForTimeout(1000);
+    // Wait for the actual GLB to finish loading (Viewport increments this
+    // counter once for renderer boot and again after model load), rather than
+    // relying on a fixed one-second delay that can capture an empty canvas.
+    await page.waitForFunction(() => {
+      const viewport = document.querySelector("[data-viewport-booted]");
+      return Number(viewport?.getAttribute("data-viewport-booted") ?? 0) >= 2;
+    }, null, { timeout: 45_000 });
+    await page.waitForTimeout(250);
     const path = `${output}/sample-face-fit-${body.toLowerCase()}.png`;
     await page.screenshot({ path, fullPage: true });
     results.push({ body, screenshot: path, canvasVisible: await page.locator("canvas").first().isVisible() });
