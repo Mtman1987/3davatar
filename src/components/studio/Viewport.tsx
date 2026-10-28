@@ -38,10 +38,10 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       if (!mesh || !loaded) return null;
       mesh.updateMatrixWorld(true);
       const wp = new THREE.Vector3(); const wr = new THREE.Euler(); const ws = new THREE.Vector3();
-      mesh.getWorldPosition(wp); mesh.getWorldQuaternion(new THREE.Quaternion()).normalize();
+      mesh.getWorldPosition(wp);
       const worldQ = new THREE.Quaternion(); mesh.getWorldQuaternion(worldQ); wr.setFromQuaternion(worldQ, mesh.rotation.order);
       mesh.getWorldScale(ws);
-      return { version: 1, bodyAsset: propsRef.current.bodyAsset, faceChoice: propsRef.current.faceChoice, parentName: mesh.parent?.name ?? "", position: [mesh.position.x,mesh.position.y,mesh.position.z], rotation: [mesh.rotation.x,mesh.rotation.y,mesh.rotation.z], scale: [mesh.scale.x,mesh.scale.y,mesh.scale.z], worldPosition: [wp.x,wp.y,wp.z], worldRotation: [wr.x,wr.y,wr.z], worldScale: [ws.x,ws.y,ws.z], capturedAt: Date.now() };
+      return { version: 1, bodyAsset: propsRef.current.bodyAsset, faceChoice: propsRef.current.faceChoice, parentName: mesh.parent?.name ?? "", position: [mesh.position.x,mesh.position.y,mesh.position.z] as [number, number, number], rotation: [mesh.rotation.x,mesh.rotation.y,mesh.rotation.z] as [number, number, number], scale: [mesh.scale.x,mesh.scale.y,mesh.scale.z] as [number, number, number], worldPosition: [wp.x,wp.y,wp.z] as [number, number, number], worldRotation: [wr.x,wr.y,wr.z] as [number, number, number], worldScale: [ws.x,ws.y,ws.z] as [number, number, number], capturedAt: Date.now() };
     },
   }));
 
@@ -291,6 +291,17 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loaded.root.add(faceMesh);
     loaded.root.updateMatrixWorld(true);
     if (headBone) headBone.attach(faceMesh);
+    // Apply a saved exact fit only to the same generic body and face variant.
+    // A missing/legacy snapshot leaves the computed default placement untouched.
+    const savedFit = props.faceFitSnapshot;
+    if (savedFit && savedFit.version === 1 &&
+      savedFit.bodyAsset === props.bodyAsset &&
+      savedFit.faceChoice === props.faceChoice &&
+      (!savedFit.parentName || savedFit.parentName === (faceMesh.parent?.name ?? ""))) {
+      faceMesh.position.fromArray(savedFit.position);
+      faceMesh.rotation.set(savedFit.rotation[0], savedFit.rotation[1], savedFit.rotation[2]);
+      faceMesh.scale.fromArray(savedFit.scale);
+    }
     loaded.root.updateMatrixWorld(true);
     // Hide only the old central nose surface that protrudes through the photo
     // face. This clones affected geometry and keeps skin indices, weights, and
