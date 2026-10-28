@@ -12,6 +12,7 @@ export function applyRiggedWardrobe(
   bodyAsset: BodyAssetId,
   outfit: OutfitId,
   hair: HairId,
+  useRealMaleTee = false,
 ): () => void {
   root.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(root);
@@ -84,9 +85,11 @@ export function applyRiggedWardrobe(
     : { tee: 0x3b9eaa, accent: 0xf0c46c, dark: 0x303747 };
 
   if (outfit === "tee") {
-    makeTorso(palette.tee, 0.76, 0.49, 0.27, joints.spine);
-    makeSleeve(-1, palette.tee, joints.leftArm, 0.11);
-    makeSleeve(1, palette.tee, joints.rightArm, 0.11);
+    if (!useRealMaleTee) {
+      makeTorso(palette.tee, 0.76, 0.49, 0.27, joints.spine);
+      makeSleeve(-1, palette.tee, joints.leftArm, 0.11);
+      makeSleeve(1, palette.tee, joints.rightArm, 0.11);
+    }
   } else if (outfit === "hoodie") {
     makeTorso(palette.dark, 0.78, 0.43, 0.34, joints.spine, "hood");
     makeSleeve(-1, palette.dark, joints.leftArm, 0.16);
