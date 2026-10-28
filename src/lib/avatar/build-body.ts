@@ -25,7 +25,7 @@ const CLOTH: Record<OutfitId, string> = {
   layers: "#243028",
 };
 
-export function buildCharacter(options: { body: BodyId; outfit: OutfitId; hair: HairId; skin: SkinId }) {
+export function buildCharacter(options: { body: LegacyProceduralBodyId; outfit: OutfitId; hair: HairId; skin: SkinId }) {
   const spec = SPECS[options.body];
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
@@ -129,7 +129,7 @@ function addOutfit(
   head: THREE.Group,
   root: THREE.Group,
   outfit: OutfitId,
-  spec: (typeof SPECS)[BodyId],
+  spec: (typeof SPECS)[LegacyProceduralBodyId],
   torsoH: number,
   hipY: number,
   geo: <T extends THREE.BufferGeometry>(g: T) => T,
