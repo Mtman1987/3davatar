@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import type { Weights } from "@/lib/avatar/arkit";
+import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
@@ -135,7 +135,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const loaded = modelRef.current;
     if (!loaded || props.modelUrl) return;
     if (faceMeshRef.current) {
-      loaded.root.remove(faceMeshRef.current);
+      faceMeshRef.current.parent?.remove(faceMeshRef.current);
       disposeFaceMesh(faceMeshRef.current);
       faceMeshRef.current = null;
     }
@@ -146,7 +146,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     geometry.setAttribute("position", new THREE.BufferAttribute(built.positions.slice(), 3));
     geometry.setAttribute("uv", new THREE.BufferAttribute(built.uvs.slice(), 2));
     geometry.setIndex(new THREE.BufferAttribute(built.indices.slice(), 1));
-    geometry.morphAttributes.position = built.morphs.map((delta) => new THREE.BufferAttribute(delta.slice(), 3));
+    geometry.morphAttributes.position = built.morphs.map((delta, index) => {
+      const attribute = new THREE.BufferAttribute(delta.slice(), 3);
+      attribute.name = ARKIT_BLENDSHAPE_NAMES[index] ?? String(index);
+      return attribute;
+    });
     geometry.morphTargetsRelative = true;
     geometry.computeVertexNormals();
 
@@ -170,10 +174,16 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     faceMesh.morphTargetInfluences?.forEach((_, i) => {
       faceMesh.morphTargetInfluences![i] = built.influences[i] ?? 0;
     });
-    loaded.root.add(faceMesh);
+    const headBone = findHeadBone(loaded.root);
+    if (headBone) {
+      loaded.root.updateMatrixWorld(true);
+      headBone.attach(faceMesh);
+    } else {
+      loaded.root.add(faceMesh);
+    }
     faceMeshRef.current = faceMesh;
     return () => {
-      if (loaded.root.children.includes(faceMesh)) loaded.root.remove(faceMesh);
+      faceMesh.parent?.remove(faceMesh);
       disposeFaceMesh(faceMesh);
       if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
     };
@@ -256,6 +266,19 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
   });
 }
 
+function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
+  let exact: THREE.Bone | null = null;
+  let neck: THREE.Bone | null = null;
+  root.traverse((object) => {
+    const bone = object as THREE.Bone;
+    if (!bone.isBone) return;
+    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
+    if (/^(head|headjoint|mixamorighead|skull)$/.test(name)) exact = bone;
+    else if (!neck && /neck/.test(name)) neck = bone;
+  });
+  return exact ?? neck;
+}
+
 function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
   const context = source.getContext("2d");
   if (!context || source.width < 8 || source.height < 8) return null;
@@ -271,7 +294,7 @@ function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
     r += rr; g += gg; b += bb; count++;
   }
   if (count < 20) return null;
-  const tone = new THREE.Color(r / count / 255, g / count / 255, b / count / 255);
+  const tone = new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
   // Keep a little headroom so the body does not inherit a photo's strongest highlight.
   tone.multiplyScalar(0.92);
   return tone;
