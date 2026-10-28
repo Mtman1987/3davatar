@@ -47,10 +47,22 @@ jobs:
 
           mkdir -p public/models
           for model in male-base-mesh-base_male.glb female-base-mesh-base_female.glb neon-gamer-facial-v2.glb; do
-            if [ -f "$model" ]; then
-              cp "$model" "public/models/$model"
+            target="public/models/$model"
+            if [ ! -s "$target" ] && [ -s "$model" ]; then
+              cp "$model" "$target"
             fi
+            if [ ! -s "$target" ] && [ "$model" != "neon-gamer-facial-v2.glb" ]; then
+              curl --fail --location --retry 3 \
+                "https://raw.githubusercontent.com/Mtman1987/3davatar/main/$model" \
+                --output "$target"
+            fi
+            if [ ! -s "$target" ]; then
+              found="$(find "$RUNNER_TEMP/avatarace-unpacked" -type f -name "$model" -size +1k -print -quit)"
+              if [ -n "$found" ]; then cp "$found" "$target"; fi
+            fi
+            test -s "$target" || { echo "Required GLB missing or empty: $target"; exit 1; }
           done
+
           if [ -f avatarace-patch/face-builder-browser.js ]; then
             mkdir -p public/avatarace-patch
             cp avatarace-patch/face-builder-browser.js public/avatarace-patch/face-builder-browser.js
@@ -59,10 +71,7 @@ jobs:
           rm -f grok-workspace.zip male-base-mesh-base_male.glb female-base-mesh-base_female.glb neon-gamer-facial-v2.glb
           rm -rf avatarace-patch attachments screenshots handoff artifacts .grok
           test -f package.json
-          test -f public/models/male-base-mesh-base_male.glb
-          test -f public/models/female-base-mesh-base_female.glb
-          test -f public/models/neon-gamer-facial-v2.glb
-          echo "Source files restored; all three required GLBs are in public/models."
+          echo "Source files restored; all three non-empty required GLBs are in public/models."
 
       - name: Install dependencies and attempt production build
         id: build
