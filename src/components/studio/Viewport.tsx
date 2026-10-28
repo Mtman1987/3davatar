@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { Weights } from "@/lib/avatar/arkit";
-import { bodyUrl, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
+import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
@@ -120,6 +120,14 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   },[props.modelUrl,props.bodyAsset,props.modelName]);
 
   useEffect(() => {
+    // Skin suits are treatments on the real male/female base GLBs only.
+    // The commissioned model is intentionally view-only and must remain untouched.
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl) return;
+    applySkinSuitMaterial(loaded.root, props.skin);
+  }, [props.skin, props.modelUrl, props.bodyAsset, booted]);
+
+  useEffect(() => {
     const loaded = modelRef.current;
     if (!loaded?.mixer) return;
     loaded.mixer.stopAllAction();
@@ -130,6 +138,64 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
   return <div ref={wrapRef} className="h-full w-full" data-viewport-booted={booted} />;
 });
+
+function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
+  const swatch = SKINS.find((entry) => entry.id === skinId)?.swatch ?? SKINS[1].swatch;
+  const skinColor = new THREE.Color(swatch);
+  const excluded = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|cloth|shirt|jacket|shoe|boot|accessor|nail/i;
+
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh || excluded.test(mesh.name || "")) return;
+    const sources = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const next = sources.map((source) => {
+      if (excluded.test(source.name || "")) return source;
+      if (source.userData.avatarSkinSuitMaterial) {
+        const existing = source as THREE.MeshStandardMaterial;
+        existing.color.copy(skinColor);
+        return existing;
+      }
+
+      // Keep the actual GLB mesh, UVs, and texture maps. The swatch is an albedo
+      // multiplier/base tint; scene lights still control highlights and shadows.
+      const material = source.clone();
+      if (!(material instanceof THREE.MeshStandardMaterial)) return material;
+      material.color.copy(skinColor);
+      material.roughness = Math.max(material.roughness, 0.72);
+      material.metalness = 0;
+      if (material instanceof THREE.MeshPhysicalMaterial) {
+        material.clearcoat = Math.min(material.clearcoat, 0.08);
+        material.clearcoatRoughness = Math.max(material.clearcoatRoughness, 0.72);
+        material.sheen = Math.max(material.sheen, 0.08);
+        material.sheenRoughness = Math.max(material.sheenRoughness, 0.8);
+      }
+      if (!material.normalMap) {
+        // Low-amplitude pore-scale normal detail, not a painted color texture.
+        const width = 96, height = 96, data = new Uint8Array(width * height * 4);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = (y * width + x) * 4;
+            const wave = Math.sin(x * 1.73 + Math.sin(y * 0.31) * 2.1) * Math.cos(y * 1.37 + Math.sin(x * 0.23));
+            data[i] = 128 + Math.round(wave * 3);
+            data[i + 1] = 128 + Math.round(Math.cos(x * 0.41 + y * 0.67) * 3);
+            data[i + 2] = 255;
+            data[i + 3] = 255;
+          }
+        }
+        const pores = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+        pores.wrapS = THREE.RepeatWrapping;
+        pores.wrapT = THREE.RepeatWrapping;
+        pores.repeat.set(5, 5);
+        pores.needsUpdate = true;
+        material.normalMap = pores;
+        material.normalScale.set(0.025, 0.025);
+      }
+      material.userData.avatarSkinSuitMaterial = true;
+      return material;
+    });
+    mesh.material = Array.isArray(mesh.material) ? next : next[0]!;
+  });
+}
 
 function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expression: number) {
   root.traverse((obj)=>{
