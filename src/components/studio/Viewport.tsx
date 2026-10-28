@@ -400,7 +400,9 @@ function trimUnderlyingNose(
   bodyHeight: number,
 ): () => void {
   const restorations: Array<{ mesh: THREE.Mesh; geometry: THREE.BufferGeometry }> = [];
-  const ignored = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|jaw|lash|accessor|nail/i;
+  // Keep separate facial details, hair, and accessories intact. Trim the base
+  // head surface covered by the photo-face mesh so it cannot poke through.
+  const ignored = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|jaw|accessor|nail/i;
   root.updateMatrixWorld(true);
   photoFace.updateMatrixWorld(true);
 
@@ -420,16 +422,18 @@ function trimUnderlyingNose(
 
   const headCenter = new THREE.Vector3();
   if (headBone) headBone.getWorldPosition(headCenter);
-  else headCenter.set(faceBounds.getCenter(new THREE.Vector3()).x, faceBounds.getCenter(new THREE.Vector3()).y, faceBounds.getCenter(new THREE.Vector3()).z);
+  else headCenter.copy(faceBounds.getCenter(new THREE.Vector3()));
   root.worldToLocal(headCenter);
 
-  // Narrow center strip across the bridge/tip region only. The photo face stays
-  // visible above it; the eyes, mouth, jaw, skull silhouette and neck remain.
-  const noseMinX = faceBounds.min.x + faceWidth * 0.44;
-  const noseMaxX = faceBounds.min.x + faceWidth * 0.56;
-  const noseMinY = faceBounds.min.y + faceHeight * 0.40;
-  const noseMaxY = faceBounds.min.y + faceHeight * 0.62;
-  const frontZ = headCenter.z + bodyHeight * 0.035;
+  // Add a small margin beyond the face mesh's bounds to prevent edge pokethrough.
+  // Restrict removal to the front surface; preserve skull silhouette, ears, and neck.
+  const marginX = faceWidth * 0.035;
+  const marginY = faceHeight * 0.025;
+  const cutMinX = faceBounds.min.x - marginX;
+  const cutMaxX = faceBounds.max.x + marginX;
+  const cutMinY = faceBounds.min.y - marginY;
+  const cutMaxY = faceBounds.max.y + marginY;
+  const frontZ = headCenter.z + bodyHeight * 0.02;
 
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
@@ -442,24 +446,25 @@ function trimUnderlyingNose(
     const indexCount = sourceIndex ? sourceIndex.count : position.count;
     if (indexCount < 3) return;
     const kept: number[] = [];
-    const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3();
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
     for (let i = 0; i + 2 < indexCount; i += 3) {
       const ia = sourceIndex ? sourceIndex.getX(i) : i;
       const ib = sourceIndex ? sourceIndex.getX(i + 1) : i + 1;
       const ic = sourceIndex ? sourceIndex.getX(i + 2) : i + 2;
       a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld);
       b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld);
-      d.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld);
-      root.worldToLocal(a); root.worldToLocal(b); root.worldToLocal(d);
-      const x = (a.x + b.x + d.x) / 3;
-      const y = (a.y + b.y + d.y) / 3;
-      const z = (a.z + b.z + d.z) / 3;
-      const noseTriangle = x >= noseMinX && x <= noseMaxX &&
-        y >= noseMinY && y <= noseMaxY && z > frontZ;
-      if (!noseTriangle) kept.push(ia, ib, ic);
+      c.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld);
+      root.worldToLocal(a); root.worldToLocal(b); root.worldToLocal(c);
+      const x = (a.x + b.x + c.x) / 3;
+      const y = (a.y + b.y + c.y) / 3;
+      const z = (a.z + b.z + c.z) / 3;
+      const underPhotoFace = x >= cutMinX && x <= cutMaxX &&
+        y >= cutMinY && y <= cutMaxY && z > frontZ;
+      if (!underPhotoFace) kept.push(ia, ib, ic);
     }
     if (kept.length === indexCount) return;
 
+    // Clone and replace only the index: UVs, skin weights, and morph attributes survive.
     const original = mesh.geometry;
     const trimmed = original.clone();
     trimmed.setIndex(kept);
