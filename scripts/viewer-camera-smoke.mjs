@@ -8,13 +8,30 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 1, reducedMotion: "reduce" });
   const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push("pageerror: " + error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push("console: " + message.text());
+  });
+  page.on("requestfailed", (request) => errors.push("requestfailed: " + request.url() + " — " + (request.failure()?.errorText ?? "unknown")));
   // Test-only query flag enters the actual sample-photo pipeline on app mount. No home-screen
   // button lookup or click is needed, so the test starts the useful work immediately.
   // Wait for response headers; TanStack Start may delay DOMContentLoaded in CI.
   // The explicit UI/canvas checks below verify that the app actually becomes usable.
   await page.goto("http://127.0.0.1:8080/?cameraSmoke=1", { waitUntil: "commit", timeout: 10_000 });
-  await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 25_000 });
+  try {
+    await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 25_000 });
+  } catch (error) {
+    await page.screenshot({ path: `${output}/failure-initial-page.png`, fullPage: true }).catch(() => {});
+    await writeFile(`${output}/failure-diagnostics.json`, JSON.stringify({
+      url: page.url(),
+      title: await page.title().catch(() => ""),
+      bodyText: await page.locator("body").innerText().catch(() => ""),
+      htmlStart: (await page.locator("html").innerHTML().catch(() => "")).slice(0, 12000),
+      pageErrors: errors,
+      failure: String(error)
+    }, null, 2));
+    throw error;
+  }
   await page.waitForFunction(() => document.querySelector("canvas")?.getBoundingClientRect().width > 0, null, { timeout: 20_000 });
   await page.waitForFunction(() => document.querySelector("[role=status]")?.textContent?.includes("Finding your face") !== true, null, { timeout: 20_000 });
 
