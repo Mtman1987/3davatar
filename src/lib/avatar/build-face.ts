@@ -1,4 +1,5 @@
 import Delaunator from "delaunator";
+import { MEDIAPIPE_FACE_TRIANGLES } from "@/lib/avatar/mediapipe-topology";
 import { ARKIT_BLENDSHAPE_NAMES, ARKIT_INDEX, type ArkitName } from "@/lib/avatar/arkit";
 import type { BuiltFace } from "@/lib/avatar/face-cache";
 
@@ -87,6 +88,15 @@ function layout(landmarks: Landmark[], mode: Mode, verticalAspect = 1) {
 }
 
 function triangulate(landmarks: Landmark[]) {
+  // Face Landmarker uses the canonical 468-vertex topology. Reuse its
+  // authored triangles rather than re-triangulating the face in 2D, which
+  // can create triangles across the eyes, lips, nostrils, and facial boundary.
+  // The additional 10 iris landmarks are intentionally excluded from the
+  // surface topology; they remain available in the landmark/morph data.
+  if (landmarks.length >= 468) {
+    return Uint32Array.from(MEDIAPIPE_FACE_TRIANGLES);
+  }
+  // Defensive fallback for reduced landmark sets in isolated tooling/tests.
   const coords = new Float32Array(landmarks.length * 2);
   for (let i = 0; i < landmarks.length; i++) {
     coords[i * 2] = landmarks[i]!.x;
