@@ -772,7 +772,9 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
   useStudio.getState().patch({
     screen: "studio",
     panel: "face",
-    body: item.bodyAsset ?? (item.body === "female" ? "female" : "male"),
+    bodyAsset: item.bodyAsset ?? (item.body === "female" ? "female" : "male"),
+    modelUrl: null,
+    modelName: null,
     outfit: item.outfit,
     hair: item.hair,
     skin: item.skin,
