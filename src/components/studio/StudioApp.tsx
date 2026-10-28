@@ -39,6 +39,7 @@ export function StudioApp() {
   const libraryRef = useRef<HTMLInputElement>(null);
   const engineRef = useRef<Sound2Face | null>(null);
   const [saved, setSaved] = useState<SavedAvatar[]>([]);
+  const smokeStarted = useRef(false);
 
   useEffect(() => {
     const engine = new Sound2Face();
@@ -97,6 +98,14 @@ export function StudioApp() {
     }
     await takePhoto(await res.blob());
   }
+
+  // The automated smoke test can enter the real sample-photo flow directly, without
+  // depending on the home-screen button being visible/clickable in headless layout.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("cameraSmoke") !== "1" || smokeStarted.current) return;
+    smokeStarted.current = true;
+    void useSample();
+  }, []);
 
   return (
     <>
