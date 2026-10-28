@@ -471,7 +471,7 @@ function Studio({
             />
           ) : null}
           {state.panel === "save" ? (
-            <SavePanel note={saveNote} onDownload={() => void download()} onKeep={() => void keep()} />
+            <SavePanel note={saveNote} finishedModel={Boolean(state.modelUrl)} morphCount={state.morphNames.length} onDownload={() => void download()} onKeep={() => void keep()} />
           ) : null}
         </div>
         <nav className="grid grid-cols-6 border-t border-border">
@@ -749,12 +749,14 @@ function VoicePanel({
   );
 }
 
-function SavePanel({ note, onDownload, onKeep }: { note: string | null; onDownload: () => void; onKeep: () => void }) {
+function SavePanel({ note, finishedModel, morphCount, onDownload, onKeep }: { note: string | null; finishedModel: boolean; morphCount: number; onDownload: () => void; onKeep: () => void }) {
   return (
     <div className="space-y-3">
       <h2 className="font-display text-xl text-fg">Your avatar is ready</h2>
       <p className="text-sm text-pretty text-muted">
-        The file includes the 52 face expressions, so it can move in StreamWeaver, VSeeFace, Unity, or from an Audio2Face stream.
+        {finishedModel
+          ? `The commissioned model is preserved as supplied, with ${morphCount} embedded facial morph targets and its included animations.`
+          : "The generated avatar includes the 52 face expressions, so it can move in StreamWeaver, VSeeFace, Unity, or from an Audio2Face stream."}
       </p>
       <button type="button" className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary font-medium text-primary-fg" onClick={onDownload}>
         <Download className="size-4" /> Download GLB
