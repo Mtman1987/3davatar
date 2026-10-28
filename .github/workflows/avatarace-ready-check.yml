@@ -1,0 +1,77 @@
+name: Validate and package AvatarAce integrated candidate
+
+on:
+  push:
+    branches:
+      - work/avatarace-complete-before-test
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out integrated candidate
+        uses: actions/checkout@v4
+
+      - name: Verify required models and commissioned asset identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s public/models/male-base-mesh-base_male.glb
+          test -s public/models/female-base-mesh-base_female.glb
+          test -s public/models/neon-gamer-facial-v2.glb
+          actual="$(sha256sum public/models/neon-gamer-facial-v2.glb | cut -d' ' -f1)"
+          expected="ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba"
+          test "$actual" = "$expected" || { echo "::error::Commissioned GLB identity mismatch: $actual"; exit 1; }
+          echo "Verified commissioned model SHA-256: $actual"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Package source for device testing
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -r AvatarAce-integrated-candidate.zip . \
+            -x ".git/*" "./.git/*" \
+               "node_modules/*" "./node_modules/*" \
+               ".vercel/*" "./.vercel/*" \
+               "dist/*" "./dist/*" \
+               "*.zip" \
+               "HeadlessBody.glb" "./HeadlessBody.glb" \
+               "Meshy_AI_*.glb" "./Meshy_AI_*.glb" \
+               "neon-gamer-facial-v2.glb" "./neon-gamer-facial-v2.glb" \
+               "vite-debug.log" "./vite-debug.log"
+          test -s AvatarAce-integrated-candidate.zip
+          unzip -l AvatarAce-integrated-candidate.zip | grep -F "public/models/neon-gamer-facial-v2.glb"
+          unzip -l AvatarAce-integrated-candidate.zip | grep -F "public/models/male-base-mesh-base_male.glb"
+          unzip -l AvatarAce-integrated-candidate.zip | grep -F "public/models/female-base-mesh-base_female.glb"
+
+      - name: Upload integrated candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AvatarAce-integrated-candidate
+          path: AvatarAce-integrated-candidate.zip
+          if-no-files-found: error
+          retention-days: 14
