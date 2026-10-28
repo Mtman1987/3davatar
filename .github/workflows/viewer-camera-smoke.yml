@@ -38,6 +38,16 @@ jobs:
           done
           cat /tmp/avatarace-vite.log
           exit 1
+      - name: Warm up TanStack client bundle
+        timeout-minutes: 1
+        run: |
+          # The first browser navigation was spending ~39 seconds in Vite dependency
+          # optimization, longer than the smoke test's 25-second UI wait. Trigger
+          # that same client-entry compilation before starting the timed browser test.
+          curl --silent --show-error --fail --max-time 55 \
+            http://127.0.0.1:8080/@id/virtual:tanstack-start-dev-client-entry \
+            --output /tmp/avatarace-client-entry.js
+          grep -E "dependencies optimized|optimized dependencies" /tmp/avatarace-vite.log || true
       - name: Exercise viewer camera and capture screenshots
         timeout-minutes: 2
         run: node scripts/viewer-camera-smoke.mjs
