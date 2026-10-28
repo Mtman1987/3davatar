@@ -281,6 +281,7 @@ function Studio({
   const [showPhoneVoice, setShowPhoneVoice] = useState(false);
   const [animationIndex, setAnimationIndex] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
+  const [morphWeights, setMorphWeights] = useState<Record<string, number>>({});
 
   async function speakAi() {
     const engine = engineRef.current;
@@ -412,7 +413,8 @@ function Studio({
           manualMorphs={{}}
           animationIndex={animationIndex}
           animationPlaying={animationPlaying}
-          onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
+          manualMorphs={morphWeights}
+          onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); setMorphWeights({}); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
           onError={(msg) => { if (msg) state.patch({ status: "error", statusText: "", error: msg }); }}
           outfit={state.outfit}
           hair={state.hair}
@@ -524,6 +526,23 @@ function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, on
           {state.animationNames.map((name, index) => <option key={index} value={index}>{name}</option>)}
         </select>
         <button type="button" className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
+      </div>
+    ) : null}
+    {state.morphNames.length ? (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-fg">Facial morph targets</h3>
+          <button type="button" className="text-xs text-accent" onClick={() => setMorphWeights({})}>Reset all</button>
+        </div>
+        <p className="text-xs text-muted">Adjust a morph to preview it on the actual loaded model.</p>
+        <div className="max-h-56 space-y-3 overflow-y-auto rounded-xl border border-border p-3">
+          {state.morphNames.map((name) => (
+            <label key={name} className="block space-y-1">
+              <span className="flex justify-between gap-2 text-xs text-muted"><span className="truncate">{name}</span><span>{(morphWeights[name] ?? 0).toFixed(2)}</span></span>
+              <input aria-label={name} className="w-full" type="range" min="0" max="1" step="0.01" value={morphWeights[name] ?? 0} onChange={(event) => setMorphWeights((current) => ({ ...current, [name]: Number(event.target.value) }))} />
+            </label>
+          ))}
+        </div>
       </div>
     ) : null}
   </div>;
