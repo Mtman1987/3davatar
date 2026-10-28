@@ -49,7 +49,7 @@ try {
   // photo pipeline instead of capturing an empty or still-loading viewer.
   try {
     await page.waitForFunction(() => {
-      const standard = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Standard");
+      const standard = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim().startsWith("Standard"));
       return standard instanceof HTMLButtonElement && !standard.disabled;
     }, null, { timeout: 90_000 });
   } catch (error) {
