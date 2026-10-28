@@ -40,7 +40,7 @@ export function applyRiggedWardrobe(
   const makeTorso = (color: number, top: number, bottom: number, length: number, joint: THREE.Bone | null, detail?: "hood" | "collar" | "open") => {
     const group = new THREE.Group();
     const garment = new THREE.Mesh(
-      new THREE.CylinderGeometry(top * width, bottom * width, h * length, 20, 1, false),
+      new THREE.CylinderGeometry(top * width * 0.24, bottom * width * 0.24, h * length, 20, 1, false),
       material(color),
     );
     garment.position.set(centerX, y((top + bottom) / 2), centerZ);
@@ -51,7 +51,7 @@ export function applyRiggedWardrobe(
     garment.receiveShadow = true;
     group.add(garment);
     if (detail === "hood") {
-      const hood = new THREE.Mesh(new THREE.SphereGeometry(width * 0.18, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.72), material(color));
+      const hood = new THREE.Mesh(new THREE.SphereGeometry(width * 0.12, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.72), material(color));
       hood.position.set(centerX, y(top + 0.035), centerZ - depth * 0.12);
       hood.scale.set(1, 1.05, 0.8);
       group.add(hood);
@@ -124,7 +124,7 @@ export function applyRiggedWardrobe(
   if (hair !== "none") {
     const group = new THREE.Group();
     const hairMat = material(bodyAsset === "female" ? 0x4b2b20 : 0x34251f, 0.62);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(width * 0.145, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.56), hairMat);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(width * 0.105, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.56), hairMat);
     cap.position.set(centerX, y(0.945), centerZ);
     cap.scale.set(1, 1.18, 1.12);
     group.add(cap);
@@ -139,7 +139,7 @@ export function applyRiggedWardrobe(
       back.position.set(centerX, y(0.84), centerZ - depth * 0.18);
       group.add(back);
     } else {
-      const fringe = new THREE.Mesh(new THREE.SphereGeometry(width * 0.13, 16, 10, 0, Math.PI, 0, Math.PI * 0.45), hairMat);
+      const fringe = new THREE.Mesh(new THREE.SphereGeometry(width * 0.09, 16, 10, 0, Math.PI, 0, Math.PI * 0.45), hairMat);
       fringe.position.set(centerX, y(0.932), centerZ + depth * 0.11);
       group.add(fringe);
     }
