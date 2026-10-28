@@ -58,7 +58,7 @@ export async function listAvatars(): Promise<SavedAvatar[]> {
       // Old or damaged IndexedDB records must not take down the whole saved-avatar library.
       const rows = raw
         .filter((row): row is Partial<SavedAvatar> => Boolean(row && typeof row === "object"))
-        .map((row, index): SavedAvatar | null => {
+        .map((row): SavedAvatar | null => {
           const id = typeof row.id === "string" && row.id ? row.id : null;
           if (!id) return null;
           const createdAt = typeof row.createdAt === "number" && Number.isFinite(row.createdAt) ? row.createdAt : 0;
