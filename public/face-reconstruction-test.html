@@ -15,14 +15,14 @@ main{max-width:1200px;margin:auto;padding:20px}h1{font-size:clamp(1.5rem,4vw,2.2
 <main>
 <header>
 <h1>Same-photo face reconstruction test</h1>
-<p>One source photo, four candidate paths, one side-by-side review. This page runs locally in your browser; selected images and scores stay on this device until you export the report.</p>
+<p>AvatarAce repository sample photo, four candidate paths, one side-by-side review. This page runs locally in your browser; selected images and scores stay on this device until you export the report.</p>
 </header>
 <section class="top">
 <div class="panel">
-<h2>1. Choose the source photo once</h2>
+<h2>1. Shared source image</h2><p>Using AvatarAce repository sample: <code>public/samples/portrait.jpg</code></p><img id="repoSample" class="preview" src="/samples/portrait.jpg" alt="AvatarAce sample portrait"><p><a href="/samples/portrait.jpg" download="avatarace-sample-portrait.jpg">Download exact sample image</a></p>
 <label class="field"><span>Source portrait (use this exact file for every candidate)</span><input id="sourceFile" type="file" accept="image/*"></label>
 <img id="sourcePreview" class="preview" alt="Selected source portrait preview" hidden>
-<div id="sourceMeta" class="meta">No source selected yet.</div>
+<div id="sourceMeta" class="meta">Repository sample: public/samples/portrait.jpg (use the download link above for external demos).</div>
 <div class="actions"><button id="copySource" type="button" disabled>Copy source details</button><button id="clearSource" type="button">Clear source</button></div>
 </div>
 <div class="panel">
