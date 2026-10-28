@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Extract mesh arrays and skeleton metadata from generic AvatarAce body GLBs.
+"""Export head-only geometry and facial rig landmarks from generic AvatarAce GLBs.
 
-Read-only: exports geometry for offline analysis; never edits source models.
+The source GLBs are read-only. Outputs contain only the spatially cropped head
+surface plus head/neck/jaw/eye/facial-muscle joint references, not the full body.
 """
 import json
 import sys
@@ -16,96 +17,152 @@ def vec(v):
     return [round(float(x), 7) for x in v]
 
 
+def node_matrix(node):
+    if node.matrix and len(node.matrix) == 16:
+        return np.asarray(node.matrix, dtype=float).reshape((4, 4), order="F")
+    t = np.eye(4)
+    t[:3, 3] = np.asarray(node.translation or [0, 0, 0], dtype=float)
+    x, y, z, w = node.rotation or [0, 0, 0, 1]
+    rot = np.array([
+        [1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w)],
+        [2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w)],
+        [2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)]
+    ])
+    s = np.diag(list(node.scale or [1, 1, 1]))
+    t[:3, :3] = rot @ s
+    return t
+
+
 def main():
     output = Path("head-geometry-report")
     output.mkdir(exist_ok=True)
-    summary = {"purpose": "Read-only full geometry export for MediaPipe-to-head mapping", "models": []}
+    summary = {"purpose": "Head-only surface crop plus facial rig reference landmarks", "models": []}
 
     for filename in sys.argv[1:]:
         path = Path(filename)
         gltf = GLTF2().load(str(path))
+        nodes = gltf.nodes or []
+        parents = {}
+        for parent_i, node in enumerate(nodes):
+            for child_i in (node.children or []):
+                parents[child_i] = parent_i
+        local_mats = [node_matrix(n) for n in nodes]
+        world_mats = [None] * len(nodes)
+
+        def world_matrix(i):
+            if world_mats[i] is not None:
+                return world_mats[i]
+            p = parents.get(i)
+            world_mats[i] = local_mats[i] if p is None else world_matrix(p) @ local_mats[i]
+            return world_mats[i]
+
+        node_names = [(n.name or f"node_{i}") for i, n in enumerate(nodes)]
+        joint_ids = set()
+        for skin in (gltf.skins or []):
+            joint_ids.update(skin.joints or [])
+
+        # Facial joints are used as anatomical anchors, not as the head surface itself.
+        anchor_terms = (
+            "head", "neck", "jaw", "eye", "orbicularis", "oris", "tongue",
+            "levator", "oculi", "temporalis", "risorius", "cheek", "brow", "lip", "nose"
+        )
+        refs = []
+        for i in sorted(joint_ids):
+            name = node_names[i]
+            low = name.lower()
+            if any(term in low for term in anchor_terms):
+                p = world_matrix(i)[:3, 3]
+                refs.append({"node_index": i, "name": name, "world_position_xyz": vec(p)})
+
+        head_refs = [r for r in refs if any(k in r["name"].lower() for k in ("head", "jaw", "eye", "orbicularis", "oris", "tongue", "levator", "oculi", "temporalis", "risorius", "cheek", "brow", "lip", "nose"))]
+        neck_refs = [r for r in refs if "neck" in r["name"].lower()]
+        if not head_refs:
+            raise RuntimeError(f"No head/face reference joints found in {path}")
+
+        points = np.asarray([r["world_position_xyz"] for r in head_refs], dtype=float)
+        lo = points.min(axis=0)
+        hi = points.max(axis=0)
+        span = np.maximum(hi - lo, np.array([0.08, 0.12, 0.08]))
+        center = (lo + hi) / 2
+
+        # Expand the landmark envelope to include skull, forehead, cheeks and chin.
+        # Keep the neck boundary near the neck joint where available.
+        x_pad = max(float(span[0]) * 0.9, 0.075)
+        z_pad = max(float(span[2]) * 1.8, 0.16)
+        y_top = float(hi[1] + max(span[1] * 0.45, 0.07))
+        y_bottom = float(lo[1] - max(span[1] * 0.18, 0.035))
+        if neck_refs:
+            neck_y = min(r["world_position_xyz"][1] for r in neck_refs)
+            y_bottom = min(y_bottom, float(neck_y) - 0.015)
+        crop_min = np.array([center[0] - x_pad, y_bottom, lo[2] - z_pad])
+        crop_max = np.array([center[0] + x_pad, y_top, hi[2] + z_pad])
+
         scene = trimesh.load(str(path), force="scene", process=False)
-
-        nodes = []
-        for i, node in enumerate(gltf.nodes or []):
-            nodes.append({
-                "index": i, "name": node.name or f"node_{i}",
-                "mesh_index": node.mesh, "skin_index": node.skin,
-                "translation": vec(node.translation or [0, 0, 0]),
-                "rotation_xyzw": vec(node.rotation or [0, 0, 0, 1]),
-                "scale": vec(node.scale or [1, 1, 1]),
-                "children": node.children or []
-            })
-
-        joints = []
-        for si, skin in enumerate(gltf.skins or []):
-            for ji, node_index in enumerate(skin.joints or []):
-                n = gltf.nodes[node_index]
-                joints.append({
-                    "skin_index": si, "joint_order": ji, "node_index": node_index,
-                    "name": n.name or f"node_{node_index}"
-                })
-
-        mesh_records = []
-        arrays = {}
+        pieces_v, pieces_f, source_records = [], [], []
+        offset = 0
         for mesh_i, node_name in enumerate(scene.graph.nodes_geometry):
             transform, geom_name = scene.graph.get(node_name)
             geom = scene.geometry.get(geom_name)
-            if geom is None or not hasattr(geom, "vertices") or len(geom.vertices) == 0:
+            if geom is None or not hasattr(geom, "vertices") or not hasattr(geom, "faces"):
                 continue
-
-            # Store both local and node-transformed vertices; faces retain original local indexing.
-            local_vertices = np.asarray(geom.vertices, dtype=np.float32)
-            world_vertices = trimesh.transform_points(local_vertices, transform).astype(np.float32)
-            faces = np.asarray(geom.faces, dtype=np.int32) if hasattr(geom, "faces") else np.empty((0, 3), dtype=np.int32)
-            normals = np.asarray(geom.vertex_normals, dtype=np.float32) if hasattr(geom, "vertex_normals") else np.empty((0, 3), dtype=np.float32)
-            safe = f"mesh_{mesh_i:02d}"
-            arrays[f"{safe}_vertices_local"] = local_vertices
-            arrays[f"{safe}_vertices_world"] = world_vertices
-            arrays[f"{safe}_faces"] = faces
-            arrays[f"{safe}_vertex_normals_local"] = normals
-
-            lo, hi = world_vertices.min(axis=0), world_vertices.max(axis=0)
-            mesh_records.append({
-                "array_key": safe,
-                "node_name": str(node_name), "geometry_name": str(geom_name),
-                "vertex_count": int(len(local_vertices)), "face_count": int(len(faces)),
-                "world_bounds_min_xyz": vec(lo), "world_bounds_max_xyz": vec(hi),
-                "world_dimensions_xyz": vec(hi - lo), "world_center_xyz": vec((lo + hi) / 2),
-                "node_world_transform_4x4": np.asarray(transform).round(8).tolist(),
-                "candidate_head_by_name": any(k in (str(node_name) + " " + str(geom_name)).lower()
-                                              for k in ("head", "face", "skull"))
+            vertices = trimesh.transform_points(np.asarray(geom.vertices), transform)
+            faces = np.asarray(geom.faces, dtype=np.int64)
+            if not len(vertices) or not len(faces):
+                continue
+            centroids = vertices[faces].mean(axis=1)
+            keep = np.all((centroids >= crop_min) & (centroids <= crop_max), axis=1)
+            kept_faces = faces[keep]
+            if not len(kept_faces):
+                continue
+            used = np.unique(kept_faces.reshape(-1))
+            remap = np.full(len(vertices), -1, dtype=np.int64)
+            remap[used] = np.arange(len(used))
+            local_faces = remap[kept_faces]
+            v = vertices[used].astype(np.float32)
+            f = local_faces.astype(np.int32)
+            pieces_v.append(v)
+            pieces_f.append(f + offset)
+            source_records.append({
+                "source_node": str(node_name), "source_geometry": str(geom_name),
+                "source_vertex_count": int(len(vertices)), "head_region_vertex_count": int(len(v)),
+                "head_region_triangle_count": int(len(f))
             })
+            offset += len(v)
 
-        mesh_records.sort(key=lambda m: (not m["candidate_head_by_name"], m["node_name"]))
-        bounds = scene.bounds
-        model = {
-            "file": path.name,
-            "scene_bounds_min_xyz": vec(bounds[0]),
-            "scene_bounds_max_xyz": vec(bounds[1]),
-            "scene_dimensions_xyz": vec(bounds[1] - bounds[0]),
-            "nodes": nodes, "joints": joints, "mesh_geometry": mesh_records,
-            "mesh_arrays_file": f"{path.stem}-mesh-arrays.npz",
-            "mesh_arrays_keys": list(arrays.keys()),
+        if not pieces_v:
+            raise RuntimeError(f"Head crop produced no triangles for {path}; refusing to emit an empty report")
+        vertices = np.concatenate(pieces_v, axis=0)
+        faces = np.concatenate(pieces_f, axis=0)
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        normals = np.asarray(mesh.vertex_normals, dtype=np.float32)
+        stem = path.stem
+        np.savez_compressed(output / f"{stem}-head-only.npz",
+                            head_vertices_world=vertices, head_triangles=faces,
+                            head_vertex_normals_world=normals)
+        bounds_min, bounds_max = vertices.min(axis=0), vertices.max(axis=0)
+        report = {
+            "source_file": path.name,
+            "output_arrays": f"{stem}-head-only.npz",
+            "crop_bounds_world_xyz": {"min": vec(crop_min), "max": vec(crop_max)},
+            "actual_head_surface_bounds_world_xyz": {"min": vec(bounds_min), "max": vec(bounds_max)},
+            "head_surface_vertex_count": int(len(vertices)),
+            "head_surface_triangle_count": int(len(faces)),
+            "facial_reference_joints": refs,
+            "source_geometry_contributions": source_records,
             "notes": [
-                "NPZ includes local and node-transformed vertices, triangle face indices, and local vertex normals for every geometry.",
-                "Vertex arrays are geometry-local and node/world transformed; triangle indices index the corresponding vertex array.",
-                "This export does not include skinned/deformed vertex positions or edit source GLBs; skinning joint/weight accessor export is a separate step if needed.",
-                "Name-based head candidates are hints only, not proof of anatomical segmentation."
+                "Only triangles whose centroids lie inside the head-region crop are exported; original GLB is unchanged.",
+                "The crop is an initial spatial extraction based on facial joint landmarks, not a hand-authored anatomical seam.",
+                "Facial joint positions are reference anchors; the NPZ surface is bind-pose geometry, not GPU-skinned/deformed output.",
+                "Check the crop visually before using it to drive face placement. The neck margin is intentionally retained for a stable attachment boundary."
             ]
         }
-        (output / f"{path.stem}.json").write_text(json.dumps(model, indent=2) + "\n", encoding="utf-8")
-        np.savez_compressed(output / f"{path.stem}-mesh-arrays.npz", **arrays)
+        (output / f"{stem}-head-only.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         summary["models"].append({
-            "file": path.name, "report": f"{path.stem}.json",
-            "mesh_arrays": f"{path.stem}-mesh-arrays.npz",
-            "node_count": len(nodes), "joint_count": len(joints),
-            "mesh_count": len(mesh_records),
-            "vertices_total": int(sum(m["vertex_count"] for m in mesh_records)),
-            "triangles_total": int(sum(m["face_count"] for m in mesh_records)),
-            "named_head_candidates": [m["node_name"] for m in mesh_records if m["candidate_head_by_name"]]
+            "source_file": path.name, "report": f"{stem}-head-only.json",
+            "arrays": f"{stem}-head-only.npz",
+            "head_vertices": int(len(vertices)), "head_triangles": int(len(faces)),
+            "facial_reference_joint_count": len(refs)
         })
-
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
