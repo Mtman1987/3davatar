@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AvatarAce — same-photo face reconstruction test</title>
+<style>
+:root{color-scheme:dark;--bg:#11151b;--panel:#1b222c;--line:#354150;--text:#eef2f7;--muted:#aab6c5;--accent:#82c8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1200px;margin:auto;padding:20px}h1{font-size:clamp(1.5rem,4vw,2.25rem);line-height:1.1;margin:.2rem 0 .6rem}h2{font-size:1.15rem;margin:0 0 .65rem}p{margin:.45rem 0;color:var(--muted)}a{color:var(--accent)}button,.button,input[type=file],select,textarea{font:inherit}button,.button{display:inline-block;border:1px solid #5b7896;border-radius:9px;padding:9px 12px;background:#20384b;color:#fff;text-decoration:none;cursor:pointer}button:hover,.button:hover{background:#2b4a63}.panel,.candidate{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;margin:14px 0}.top{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);gap:14px}.preview{width:100%;max-height:360px;object-fit:contain;background:#0b0e12;border:1px solid var(--line);border-radius:8px;margin-top:10px}.meta{font-size:.88rem;color:var(--muted);overflow-wrap:anywhere}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.candidate h2{display:flex;justify-content:space-between;gap:8px;align-items:center}.tag{font-size:.75rem;border:1px solid var(--line);padding:2px 7px;border-radius:999px;color:var(--muted);white-space:nowrap}.output{width:100%;height:240px;object-fit:contain;background:#0b0e12;border:1px dashed #4a5868;border-radius:8px;margin-top:10px}.field{display:block;margin:10px 0}.field span{display:block;font-size:.9rem;color:var(--muted);margin-bottom:4px}input[type=file]{max-width:100%;font-size:.88rem}select,textarea{width:100%;border:1px solid var(--line);border-radius:7px;background:#10151c;color:var(--text);padding:8px}textarea{min-height:64px;resize:vertical}.scores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.notice{border-left:3px solid #d7ad57;padding:8px 12px;background:#2a251a;color:#e9ddc1;border-radius:5px}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.small{font-size:.84rem}.status{color:#b9e8c9}.footer{font-size:.82rem;color:var(--muted);padding:8px 0 28px}
+@media(max-width:760px){main{padding:12px}.top,.grid{grid-template-columns:1fr}.candidate{padding:12px}.output{height:220px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>Same-photo face reconstruction test</h1>
+<p>AvatarAce repository sample photo, four candidate paths, one side-by-side review. This page runs locally in your browser; selected images and scores stay on this device until you export the report.</p>
+</header>
+<section class="top">
+<div class="panel">
+<h2>1. Shared source image</h2><p>Using AvatarAce repository sample: <code>public/samples/portrait.jpg</code></p><img id="repoSample" class="preview" src="/samples/portrait.jpg" alt="AvatarAce sample portrait"><p><a href="/samples/portrait.jpg" download="avatarace-sample-portrait.jpg">Download exact sample image</a></p>
+<label class="field"><span>Source portrait (use this exact file for every candidate)</span><input id="sourceFile" type="file" accept="image/*"></label>
+<img id="sourcePreview" class="preview" alt="Selected source portrait preview" hidden>
+<div id="sourceMeta" class="meta">Repository sample: public/samples/portrait.jpg (use the download link above for external demos).</div>
+<div class="actions"><button id="copySource" type="button" disabled>Copy source details</button><button id="clearSource" type="button">Clear source</button></div>
+</div>
+<div class="panel">
+<h2>2. Keep the comparison fair</h2>
+<ul class="small">
+<li>Use the same photo file, not a screenshot or a differently cropped copy.</li>
+<li>For each external demo, upload that same file manually. The demos do not expose a verified shared upload API, so this page does not pretend to send the photo automatically.</li>
+<li>Save each result image, then attach it to the matching candidate card below. For AvatarAce, capture the current viewer result.</li>
+<li>Score identity, 3D shape, texture, and fit from 1 (poor) to 5 (strong).</li>
+</ul>
+<p id="fairStatus" class="status">Waiting for a source photo.</p>
+</div>
+</section>
+<section>
+<h2>3. Run candidates and attach their output</h2>
+<div class="grid">
+<article class="candidate" data-candidate="avatarace">
+<h2>AvatarAce current pipeline <span class="tag">Baseline</span></h2>
+<p>Run the existing Face panel with the selected photo. Inspect Standard and Detail on the generic male and female bodies.</p>
+<div class="actions"><button type="button" data-copy-link="avatarace">Copy source details</button></div>
+<label class="field"><span>Saved output screenshot</span><input class="outputFile" type="file" accept="image/*"></label>
+<img class="output" alt="AvatarAce output preview" hidden>
+<div class="scores">
+<label class="field"><span>Identity resemblance</span><select data-score="identity"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>3D shape / depth</span><select data-score="shape"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Texture / seams</span><select data-score="texture"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Body fit / animation</span><select data-score="fit"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+</div>
+<label class="field"><span>Notes / visible defects</span><textarea data-notes placeholder="Jaw, eye line, face depth, UV stretching, bone fit..."></textarea></label>
+</article>
+<article class="candidate" data-candidate="mediapipe">
+<h2>MediaPipe Face Mesh <span class="tag">Landmark mesh</span></h2>
+<p>Quick browser demo. Useful as a landmark/topology reference; it is not necessarily a complete identity-specific 3D head reconstruction.</p>
+<div class="actions"><a class="button" href="https://huggingface.co/spaces/hysts/mediapipe-face-mesh" target="_blank" rel="noopener noreferrer">Open MediaPipe demo</a></div>
+<label class="field"><span>Saved output image / screenshot</span><input class="outputFile" type="file" accept="image/*"></label>
+<img class="output" alt="MediaPipe output preview" hidden>
+<div class="scores">
+<label class="field"><span>Identity resemblance</span><select data-score="identity"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>3D shape / depth</span><select data-score="shape"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Texture / seams</span><select data-score="texture"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Body fit / animation</span><select data-score="fit"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+</div>
+<label class="field"><span>Notes / visible defects</span><textarea data-notes placeholder="Does it produce a full head or only a face surface?"></textarea></label>
+</article>
+<article class="candidate" data-candidate="reconstruction">
+<h2>3D face reconstruction <span class="tag">External demo</span></h2>
+<p>Test whether this produces a more complete 3D head with useful shape and texture.</p>
+<div class="actions"><a class="button" href="https://huggingface.co/spaces/Prashanthsrn/3d_face_reconstruction" target="_blank" rel="noopener noreferrer">Open reconstruction demo</a></div>
+<label class="field"><span>Saved output image / screenshot</span><input class="outputFile" type="file" accept="image/*"></label>
+<img class="output" alt="3D reconstruction output preview" hidden>
+<div class="scores">
+<label class="field"><span>Identity resemblance</span><select data-score="identity"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>3D shape / depth</span><select data-score="shape"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Texture / seams</span><select data-score="texture"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Body fit / animation</span><select data-score="fit"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+</div>
+<label class="field"><span>Notes / visible defects</span><textarea data-notes placeholder="Check geometry quality, texture, and export options."></textarea></label>
+</article>
+<article class="candidate" data-candidate="deca">
+<h2>DECA <span class="tag">Local research test</span></h2>
+<p>DECA is not a simple hosted upload demo in this comparison. Its official workflow requires a separate Python/model setup, so test it locally only if that setup is available.</p>
+<div class="notice small">License gate: the official DECA code and model are described as non-commercial scientific research only. Do not use it in the commercial product workflow without explicit permission.</div>
+<div class="actions"><a class="button" href="https://github.com/yfeng95/DECA" target="_blank" rel="noopener noreferrer">DECA setup / instructions</a><a class="button" href="https://deca.is.tue.mpg.de/" target="_blank" rel="noopener noreferrer">Official project page</a></div>
+<label class="field"><span>Saved output image / screenshot (if run)</span><input class="outputFile" type="file" accept="image/*"></label>
+<img class="output" alt="DECA output preview" hidden>
+<div class="scores">
+<label class="field"><span>Identity resemblance</span><select data-score="identity"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>3D shape / depth</span><select data-score="shape"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Texture / seams</span><select data-score="texture"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="field"><span>Body fit / animation</span><select data-score="fit"><option value="">Not scored</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+</div>
+<label class="field"><span>Notes / visible defects</span><textarea data-notes placeholder="Record whether the mesh and texture can be exported and rigged."></textarea></label>
+</article>
+</div>
+</section>
+<section class="panel">
+<h2>4. Export the comparison</h2>
+<p>Download a JSON score report with the source filename, dimensions, SHA-256, scores, and notes. Output images are previewed locally but are not embedded in the JSON.</p>
+<div class="actions"><button id="exportReport" type="button">Download test report (.json)</button><button id="resetScores" type="button">Reset scores and outputs</button></div>
+<p id="reportStatus" class="meta">No report exported yet.</p>
+</section>
+<p class="footer">Privacy: this page does not upload files to AvatarAce or any external service. You choose what to upload on each demo's own site. This is an evaluation aid, not an automated accuracy benchmark.</p>
+</main>
+<script>
+const sourceInput = document.getElementById('sourceFile');
+const sourcePreview = document.getElementById('sourcePreview');
+const sourceMeta = document.getElementById('sourceMeta');
+const fairStatus = document.getElementById('fairStatus');
+let sourceRecord = null;
+let sourceUrl = null;
+const candidateNames = {
+  avatarace: 'AvatarAce current pipeline',
+  mediapipe: 'MediaPipe Face Mesh',
+  reconstruction: '3D face reconstruction demo',
+  deca: 'DECA (local research test)'
+};
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function hashFile(file) {
+  if (!crypto.subtle) return 'SHA-256 unavailable in this browser context';
+  const bytes = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+sourceInput.addEventListener('change', async () => {
+  const file = sourceInput.files && sourceInput.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); sourceInput.value=''; return; }
+  if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+  sourceUrl = URL.createObjectURL(file);
+  sourcePreview.src = sourceUrl;
+  sourcePreview.hidden = false;
+  sourceMeta.textContent = 'Reading image dimensions and hash…';
+  const image = new Image();
+  image.onload = async () => {
+    sourceRecord = { filename: file.name, mimeType: file.type, bytes: file.size, width: image.naturalWidth, height: image.naturalHeight, sha256: await hashFile(file) };
+    sourceMeta.textContent = 'File: ' + sourceRecord.filename + ' · ' + sourceRecord.width + ' × ' + sourceRecord.height + ' · ' + sourceRecord.bytes + ' bytes · SHA-256: ' + sourceRecord.sha256;
+    fairStatus.textContent = 'Source locked for this comparison. Match the SHA-256 / file when uploading to each candidate.';
+    document.getElementById('copySource').disabled = false;
+  };
+  image.onerror = () => { sourceMeta.textContent = 'Could not read this image.'; sourceRecord = null; };
+  image.src = sourceUrl;
+});
+function sourceDetails() {
+  if (!sourceRecord) return 'Choose a source image first.';
+  return 'AvatarAce same-photo test\\nFilename: ' + sourceRecord.filename + '\\nDimensions: ' + sourceRecord.width + ' x ' + sourceRecord.height + '\\nBytes: ' + sourceRecord.bytes + '\\nSHA-256: ' + sourceRecord.sha256 + '\\nUse this exact file for every candidate; do not recrop or recompress it.';
+}
+async function copyDetails() {
+  if (!sourceRecord) { alert('Choose a source photo first.'); return; }
+  try { await navigator.clipboard.writeText(sourceDetails()); fairStatus.textContent = 'Source details copied. Use the exact same photo file for every candidate.'; }
+  catch { prompt('Copy these source details:', sourceDetails()); }
+}
+document.getElementById('copySource').addEventListener('click', copyDetails);
+document.querySelectorAll('[data-copy-link]').forEach(b => b.addEventListener('click', copyDetails));
+document.getElementById('clearSource').addEventListener('click', () => {
+  sourceInput.value = '';
+  if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+  sourceUrl = null; sourceRecord = null; sourcePreview.removeAttribute('src'); sourcePreview.hidden = true;
+  sourceMeta.textContent = 'No source selected yet.'; fairStatus.textContent = 'Waiting for a source photo.';
+  document.getElementById('copySource').disabled = true;
+});
+document.querySelectorAll('.candidate').forEach(card => {
+  const input = card.querySelector('.outputFile');
+  const img = card.querySelector('.output');
+  let url = null;
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(file);
+    img.src = url; img.hidden = false;
+  });
+});
+document.getElementById('exportReport').addEventListener('click', () => {
+  const candidates = {};
+  document.querySelectorAll('.candidate').forEach(card => {
+    const id = card.dataset.candidate;
+    const scores = {};
+    card.querySelectorAll('[data-score]').forEach(s => scores[s.dataset.score] = s.value ? Number(s.value) : null);
+    candidates[id] = { name: candidateNames[id], scores, notes: card.querySelector('[data-notes]').value, outputFilename: (card.querySelector('.outputFile').files[0] || {}).name || null };
+  });
+  const report = { title: 'AvatarAce same-photo face reconstruction comparison', createdAt: new Date().toISOString(), source: sourceRecord, candidates, rubric: { scale: '1 = poor, 5 = strong', categories: ['identity resemblance','3D shape / depth','texture / seams','body fit / animation'] }, caveats: ['External demos require manual upload of the exact same source file.', 'Output images are not embedded in this JSON.', 'DECA is a separate local research test and license-restricted.'] };
+  const blob = new Blob([JSON.stringify(report, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'avatarace-face-comparison-' + new Date().toISOString().slice(0,10) + '.json'; a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('reportStatus').textContent = 'Report downloaded. Keep the output images separately alongside the JSON.';
+});
+document.getElementById('resetScores').addEventListener('click', () => {
+  document.querySelectorAll('.candidate').forEach(card => {
+    card.querySelectorAll('[data-score]').forEach(s => s.value = '');
+    card.querySelector('[data-notes]').value = '';
+    const input = card.querySelector('.outputFile');
+    const img = card.querySelector('.output');
+    input.value = ''; img.removeAttribute('src'); img.hidden = true;
+  });
+  document.getElementById('reportStatus').textContent = 'Scores and output attachments reset.';
+});
+
+async function loadRepositorySample() {
+  try {
+    const response = await fetch('/samples/portrait.jpg');
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const blob = await response.blob();
+    const imageFile = new File([blob], 'portrait.jpg', { type: blob.type || 'image/jpeg' });
+    const imageUrl = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = async () => {
+      sourceRecord = {
+        filename: 'portrait.jpg',
+        path: 'public/samples/portrait.jpg',
+        mimeType: imageFile.type,
+        bytes: imageFile.size,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        sha256: await hashFile(imageFile)
+      };
+      sourceUrl = imageUrl;
+      sourcePreview.src = imageUrl;
+      sourcePreview.hidden = false;
+      sourceMeta.textContent = 'Repository sample loaded: ' + sourceRecord.width + ' × ' + sourceRecord.height + ' · ' + sourceRecord.bytes + ' bytes · SHA-256: ' + sourceRecord.sha256;
+      fairStatus.textContent = 'Ready. Download the exact sample above and upload that same file to each external demo.';
+      document.getElementById('copySource').disabled = false;
+    };
+    image.onerror = () => { URL.revokeObjectURL(imageUrl); sourceMeta.textContent = 'Could not decode repository sample image.'; };
+    image.src = imageUrl;
+  } catch (error) {
+    sourceMeta.textContent = 'Could not load repository sample. Open this page through the running AvatarAce app. ' + error.message;
+  }
+}
+loadRepositorySample();
+</script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+name: Validate MediaPipe face pipeline
+
+on:
+  push:
+    branches:
+      - experiment/mediapipe-face-pipeline
+      - experiment/face-fit-json-snapshot
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/lib/avatar/**"
+      - "src/components/studio/Viewport.tsx"
+      - "docs/face-reconstruction-evaluation.md"
+      - ".github/workflows/face-pipeline-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

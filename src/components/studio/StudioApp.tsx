@@ -39,6 +39,7 @@ export function StudioApp() {
   const libraryRef = useRef<HTMLInputElement>(null);
   const engineRef = useRef<Sound2Face | null>(null);
   const [saved, setSaved] = useState<SavedAvatar[]>([]);
+  const smokeStarted = useRef(false);
 
   useEffect(() => {
     const engine = new Sound2Face();
@@ -97,6 +98,23 @@ export function StudioApp() {
     }
     await takePhoto(await res.blob());
   }
+
+  // The automated smoke test can enter the real sample-photo flow directly, without
+  // depending on the home-screen button being visible/clickable in headless layout.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("cameraSmoke") !== "1" || smokeStarted.current) return;
+    smokeStarted.current = true;
+    // Enter the studio immediately so a slow sample/MediaPipe load cannot leave
+    // the SSR home screen visible throughout the browser smoke test.
+    patch({
+      screen: "studio",
+      panel: "face",
+      status: "working",
+      statusText: "Loading sample portrait…",
+      error: null,
+    });
+    void useSample();
+  }, []);
 
   return (
     <>
@@ -398,6 +416,7 @@ function Studio({
       headY: snap.headY,
       headZ: snap.headZ,
       expression: snap.expression,
+      faceFit: viewRef.current?.captureFaceFit() ?? snap.faceFitSnapshot ?? null,
     });
     await refreshSaves();
     setSaveNote("Saved on this phone.");
@@ -433,13 +452,14 @@ function Studio({
           headZ={state.headZ}
           expression={state.expression}
           faceRev={state.faceRev}
+          faceFitSnapshot={state.faceFitSnapshot}
           sampleSound={() => engineRef.current?.sample() ?? null}
         />
         <div className="safe-top pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3">
           <button type="button" className="pointer-events-auto grid size-11 place-items-center rounded-full bg-surface/90 text-fg" onClick={onBack} aria-label="Back">
             <ChevronLeft className="size-5" />
           </button>
-          <p className="rounded-full bg-surface/90 px-3 py-1 text-xs tracking-wide text-muted">Drag to turn</p>
+          <p className="rounded-full bg-surface/90 px-3 py-1 text-xs tracking-wide text-muted">1 finger: turn · 2 fingers: move / zoom</p>
           <span className="size-11" />
         </div>
         {state.status === "working" ? (
@@ -668,7 +688,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
           </button>
         ))}
       </div>
-      <Slider label="Head size" min={0.8} max={1.35} step={0.01} value={state.headScale} onChange={(headScale) => state.patch({ headScale })} />
+      <Slider label="Head size" min={0.72} max={1.35} step={0.01} value={state.headScale} onChange={(headScale) => state.patch({ headScale })} />
       <Slider label="Height" min={-0.06} max={0.08} step={0.005} value={state.headY} onChange={(headY) => state.patch({ headY })} />
       <Slider label="Depth" min={-0.04} max={0.1} step={0.005} value={state.headZ} onChange={(headZ) => state.patch({ headZ })} />
       <Slider label="Expression" min={0} max={1.4} step={0.01} value={state.expression} onChange={(expression) => state.patch({ expression })} />
@@ -840,6 +860,7 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
     headY: item.headY,
     headZ: item.headZ,
     expression: item.expression,
+    faceFitSnapshot: item.faceFit ?? null,
     error: null,
   });
   if (!item.photo || hasFinishedModel) return;
