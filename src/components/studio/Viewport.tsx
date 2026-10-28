@@ -86,8 +86,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const scene=sceneRef.current,camera=cameraRef.current;if(!scene||!camera)return;
     let cancelled=false; const url=props.modelUrl ?? bodyUrl(props.bodyAsset);
     if(modelRef.current){scene.remove(modelRef.current.root);modelRef.current.mixer?.stopAllAction();disposeModel(modelRef.current.root);modelRef.current=null;}
-    props.onModelInfo?.({morphNames:[],animationNames:[]});
-    props.onError?.("");
+    propsRef.current.onModelInfo?.({morphNames:[],animationNames:[]});
+    propsRef.current.onError?.("");
     const loader=new GLTFLoader();
     loader.load(url,(gltf)=>{
       if(cancelled){disposeModel(gltf.scene);return;}
@@ -95,7 +95,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       root.updateMatrixWorld(true);
       const bounds=new THREE.Box3().setFromObject(root);
       if(bounds.isEmpty() || !Number.isFinite(bounds.min.y) || !Number.isFinite(bounds.max.y)){
-        disposeModel(root);props.onError?.("The model loaded but has no valid visible geometry: "+url);return;
+        disposeModel(root);propsRef.current.onError?.("The model loaded but has no valid visible geometry: "+url);return;
       }
       const size=bounds.getSize(new THREE.Vector3()); const height=Math.max(size.y,0.0001);
       // Normalize arbitrary source units to a viewer-friendly height, preserving the original mesh and morph data.
@@ -109,15 +109,15 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
       root.traverse((obj)=>{const mesh=obj as THREE.Mesh; if(mesh.isMesh && mesh.morphTargetDictionary)Object.keys(mesh.morphTargetDictionary).forEach(n=>morphNames.add(n));});
-      props.onModelInfo?.({morphNames:[...morphNames].sort(),animationNames:clips.map(c=>c.name || "Unnamed animation")});
+      propsRef.current.onModelInfo?.({morphNames:[...morphNames].sort(),animationNames:clips.map(c=>c.name || "Unnamed animation")});
       setBooted(n=>n+1);
     },undefined,(error)=>{
       if(cancelled)return;
       const detail=error instanceof Error?error.message:"Unknown GLB loading error";
-      props.onError?.("Failed to load required model "+url+": "+detail);
+      propsRef.current.onError?.("Failed to load required model "+url+": "+detail);
     });
     return ()=>{cancelled=true;};
-  },[props.modelUrl,props.bodyAsset,props.modelName,props.onModelInfo,props.onError]);
+  },[props.modelUrl,props.bodyAsset,props.modelName]);
 
   return <div ref={wrapRef} className="h-full w-full" data-viewport-booted={booted} />;
 });
