@@ -449,7 +449,7 @@ function Studio({
       <section className="safe-bottom flex max-h-[52dvh] flex-col border-t border-border bg-surface lg:max-h-none lg:border-t-0 lg:border-l">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {state.panel === "body" ? <BodyPanel /> : null}
-          {state.panel === "finished" ? <FinishedPanel animationIndex={animationIndex} onAnimationChange={setAnimationIndex} animationPlaying={animationPlaying} onToggleAnimation={() => setAnimationPlaying((playing) => !playing)} /> : null}
+          {state.panel === "finished" ? <FinishedPanel animationIndex={animationIndex} onAnimationChange={setAnimationIndex} animationPlaying={animationPlaying} onToggleAnimation={() => setAnimationPlaying((playing) => !playing)} morphWeights={morphWeights} onMorphChange={(name, value) => setMorphWeights((current) => ({ ...current, [name]: value }))} onResetMorphs={() => setMorphWeights({})} /> : null}
           {state.panel === "look" ? <LookPanel /> : null}
           {state.panel === "face" ? (
             <FacePanel onCamera={onCamera} onLibrary={onLibrary} onSample={onSample} />
@@ -505,11 +505,14 @@ function BodyPanel() {
   );
 }
 
-function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, onToggleAnimation }: {
+function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, onToggleAnimation, morphWeights, onMorphChange, onResetMorphs }: {
   animationIndex: number;
   onAnimationChange: (index: number) => void;
   animationPlaying: boolean;
   onToggleAnimation: () => void;
+  morphWeights: Record<string, number>;
+  onMorphChange: (name: string, value: number) => void;
+  onResetMorphs: () => void;
 }) {
   const state = useStudio();
   return <div className="space-y-3">
@@ -532,14 +535,14 @@ function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, on
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-fg">Facial morph targets</h3>
-          <button type="button" className="text-xs text-accent" onClick={() => setMorphWeights({})}>Reset all</button>
+          <button type="button" className="text-xs text-accent" onClick={onResetMorphs}>Reset all</button>
         </div>
         <p className="text-xs text-muted">Adjust a morph to preview it on the actual loaded model.</p>
         <div className="max-h-56 space-y-3 overflow-y-auto rounded-xl border border-border p-3">
           {state.morphNames.map((name) => (
             <label key={name} className="block space-y-1">
               <span className="flex justify-between gap-2 text-xs text-muted"><span className="truncate">{name}</span><span>{(morphWeights[name] ?? 0).toFixed(2)}</span></span>
-              <input aria-label={name} className="w-full" type="range" min="0" max="1" step="0.01" value={morphWeights[name] ?? 0} onChange={(event) => setMorphWeights((current) => ({ ...current, [name]: Number(event.target.value) }))} />
+              <input aria-label={name} className="w-full" type="range" min="0" max="1" step="0.01" value={morphWeights[name] ?? 0} onChange={(event) => onMorphChange(name, Number(event.target.value))} />
             </label>
           ))}
         </div>
