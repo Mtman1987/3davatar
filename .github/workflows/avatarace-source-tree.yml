@@ -56,9 +56,7 @@ jobs:
                 "https://raw.githubusercontent.com/Mtman1987/3davatar/main/$model" \
                 --output "$target"
             fi
-            if [ ! -s "$target" ] && [ "$model" = "neon-gamer-facial-v2.glb" ] && [ -s "neon-gamer-facial-poc.glb" ]; then
-              cp neon-gamer-facial-poc.glb "$target"
-            fi
+            # Never substitute the POC for the commissioned v2 asset.
             if [ ! -s "$target" ]; then
               found="$(find "$RUNNER_TEMP/avatarace-unpacked" -type f -name "$model" -size +1k -print -quit)"
               if [ -n "$found" ]; then cp "$found" "$target"; fi
