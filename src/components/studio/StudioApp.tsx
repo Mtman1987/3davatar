@@ -279,6 +279,8 @@ function Studio({
   const viewRef = useRef<ViewportHandle>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [showPhoneVoice, setShowPhoneVoice] = useState(false);
+  const [animationIndex, setAnimationIndex] = useState(0);
+  const [animationPlaying, setAnimationPlaying] = useState(false);
 
   async function speakAi() {
     const engine = engineRef.current;
@@ -408,7 +410,9 @@ function Studio({
           modelName={state.modelName}
           sampleTracking={() => null}
           manualMorphs={{}}
-          onModelInfo={(info) => state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null })}
+          animationIndex={animationIndex}
+          animationPlaying={animationPlaying}
+          onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
           onError={(msg) => { if (msg) state.patch({ status: "error", statusText: "", error: msg }); }}
           outfit={state.outfit}
           hair={state.hair}
@@ -443,7 +447,7 @@ function Studio({
       <section className="safe-bottom flex max-h-[52dvh] flex-col border-t border-border bg-surface lg:max-h-none lg:border-t-0 lg:border-l">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {state.panel === "body" ? <BodyPanel /> : null}
-          {state.panel === "finished" ? <FinishedPanel /> : null}
+          {state.panel === "finished" ? <FinishedPanel animationIndex={animationIndex} onAnimationChange={setAnimationIndex} animationPlaying={animationPlaying} onToggleAnimation={() => setAnimationPlaying((playing) => !playing)} /> : null}
           {state.panel === "look" ? <LookPanel /> : null}
           {state.panel === "face" ? (
             <FacePanel onCamera={onCamera} onLibrary={onLibrary} onSample={onSample} />
@@ -499,7 +503,12 @@ function BodyPanel() {
   );
 }
 
-function FinishedPanel() {
+function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, onToggleAnimation }: {
+  animationIndex: number;
+  onAnimationChange: (index: number) => void;
+  animationPlaying: boolean;
+  onToggleAnimation: () => void;
+}) {
   const state = useStudio();
   return <div className="space-y-3">
     <h2 className="font-display text-xl text-fg">Finished commission</h2>
@@ -508,7 +517,15 @@ function FinishedPanel() {
     <button type="button" className="h-11 w-full rounded-full border border-border" onClick={() => state.patch({ modelUrl: null, modelName: null, bodyAsset: "male", status: "working", statusText: "Loading male base…", error: null, panel: "body" })}>Back to male base</button>
     {state.error ? <p role="alert" className="text-sm text-red-400">{state.error}</p> : null}
     <p className="text-xs text-muted">Morph targets: {state.morphNames.length} · Animations: {state.animationNames.length}</p>
-    {state.animationNames.length ? <ul className="max-h-32 overflow-auto text-xs text-muted">{state.animationNames.map((name) => <li key={name}>{name}</li>)}</ul> : null}
+    {state.animationNames.length ? (
+      <div className="space-y-2">
+        <label className="block text-xs text-muted" htmlFor="commission-animation">Embedded animation</label>
+        <select id="commission-animation" className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg" value={Math.min(animationIndex, state.animationNames.length - 1)} onChange={(event) => onAnimationChange(Number(event.target.value))}>
+          {state.animationNames.map((name, index) => <option key={index} value={index}>{name}</option>)}
+        </select>
+        <button type="button" className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
+      </div>
+    ) : null}
   </div>;
 }
 
