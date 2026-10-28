@@ -1,6 +1,12 @@
 name: Validate AvatarAce source tree
 
 on:
+  push:
+    branches:
+      - feat/no-procedural-finished-runtime
+  pull_request:
+    branches:
+      - work/avatarace-source-tree
   workflow_dispatch:
 
 permissions:
@@ -10,10 +16,8 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out working branch
+      - name: Check out tested commit
         uses: actions/checkout@v4
-        with:
-          ref: work/avatarace-source-tree
       - name: Validate required assets without substituting models
         shell: bash
         run: |
