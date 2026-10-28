@@ -54,20 +54,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          zip -r AvatarAce-integrated-candidate.zip . \
-            -x ".git/*" "./.git/*" \
-               "node_modules/*" "./node_modules/*" \
-               ".vercel/*" "./.vercel/*" \
-               "dist/*" "./dist/*" \
-               "*.zip" \
-               "HeadlessBody.glb" "./HeadlessBody.glb" \
-               "Meshy_AI_*.glb" "./Meshy_AI_*.glb" \
-               "neon-gamer-facial-v2.glb" "./neon-gamer-facial-v2.glb" \
-               "vite-debug.log" "./vite-debug.log"
+          # Archive tracked files only; this avoids accidentally including the ZIP in itself.
+          git archive --format=zip --output=AvatarAce-integrated-candidate.zip HEAD
           test -s AvatarAce-integrated-candidate.zip
-          unzip -l AvatarAce-integrated-candidate.zip | grep -F "public/models/neon-gamer-facial-v2.glb"
-          unzip -l AvatarAce-integrated-candidate.zip | grep -F "public/models/male-base-mesh-base_male.glb"
-          unzip -l AvatarAce-integrated-candidate.zip | grep -F "public/models/female-base-mesh-base_female.glb"
+          unzip -t AvatarAce-integrated-candidate.zip
+          unzip -Z1 AvatarAce-integrated-candidate.zip | grep -Fx "public/models/neon-gamer-facial-v2.glb"
+          unzip -Z1 AvatarAce-integrated-candidate.zip | grep -Fx "public/models/male-base-mesh-base_male.glb"
+          unzip -Z1 AvatarAce-integrated-candidate.zip | grep -Fx "public/models/female-base-mesh-base_female.glb"
+          if unzip -Z1 AvatarAce-integrated-candidate.zip | grep -E '^(HeadlessBody[.]glb|Meshy_AI_.*[.]glb|neon-gamer-facial-v2[.]glb)$'; then
+            echo "::error::A root-level duplicate GLB was included in the package."
+            exit 1
+          fi
 
       - name: Upload integrated candidate artifact
         uses: actions/upload-artifact@v4
