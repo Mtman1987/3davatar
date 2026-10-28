@@ -55,14 +55,56 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       camera.lookAt(target);
     };
     placeCamera();
-    const pointers = new Map<number, {x:number;y:number}>(); let lastPinch = 0, lastX = 0, lastY = 0;
-    const onDown = (e: PointerEvent) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); lastX=e.clientX;lastY=e.clientY;lastPinch=0; };
-    const onMove = (e: PointerEvent) => {
-      if (!pointers.has(e.pointerId)) return; pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-      if (pointers.size >= 2) { const [a,b]=[...pointers.values()]; if(!a||!b)return; const d=Math.hypot(a.x-b.x,a.y-b.y); if(lastPinch>0)radius=clamp(radius*lastPinch/Math.max(d,1),0.08,30);lastPinch=d;placeCamera();return; }
-      yaw -= (e.clientX-lastX)*0.008; pitch=clamp(pitch+(e.clientY-lastY)*0.006,0.15,Math.PI-0.15);lastX=e.clientX;lastY=e.clientY;placeCamera();
+    const pointers = new Map<number, {x:number;y:number}>();
+    let lastPinch = 0, lastX = 0, lastY = 0;
+    const onDown = (e: PointerEvent) => {
+      canvas.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      lastX = e.clientX; lastY = e.clientY; lastPinch = 0;
     };
-    const onUp = (e: PointerEvent) => { pointers.delete(e.pointerId);lastPinch=0; };
+    const onMove = (e: PointerEvent) => {
+      const previous = pointers.get(e.pointerId);
+      if (!previous) return;
+      const before = [...pointers.values()];
+      const current = { x: e.clientX, y: e.clientY };
+      pointers.set(e.pointerId, current);
+      if (pointers.size >= 2) {
+        const [a0, b0] = before;
+        const [a1, b1] = [...pointers.values()];
+        if (!a0 || !b0 || !a1 || !b1) return;
+        const oldDistance = Math.hypot(a0.x - b0.x, a0.y - b0.y);
+        const newDistance = Math.hypot(a1.x - b1.x, a1.y - b1.y);
+        if (oldDistance > 0) radius = clamp(radius * oldDistance / Math.max(newDistance, 1), 0.08, 30);
+
+        // Two-finger translation pans the camera target in camera space.
+        // Scale by the visible world height so the gesture feels consistent
+        // across zoom levels and phone/tablet viewport sizes.
+        const midpointBefore = { x: (a0.x + b0.x) * 0.5, y: (a0.y + b0.y) * 0.5 };
+        const midpointAfter = { x: (a1.x + b1.x) * 0.5, y: (a1.y + b1.y) * 0.5 };
+        const dx = midpointAfter.x - midpointBefore.x;
+        const dy = midpointAfter.y - midpointBefore.y;
+        const viewportHeight = Math.max(1, wrap.clientHeight);
+        const worldUnitsPerPixel = (2 * radius * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5))) / viewportHeight;
+        camera.updateMatrixWorld();
+        const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+        const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+        target.addScaledVector(cameraRight, -dx * worldUnitsPerPixel);
+        target.addScaledVector(cameraUp, dy * worldUnitsPerPixel);
+        lastPinch = newDistance;
+        placeCamera();
+        return;
+      }
+      yaw -= (current.x - lastX) * 0.008;
+      pitch = clamp(pitch + (current.y - lastY) * 0.006, 0.15, Math.PI - 0.15);
+      lastX = current.x; lastY = current.y;
+      placeCamera();
+    };
+    const onUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      lastPinch = 0;
+      const remaining = [...pointers.values()][0];
+      if (remaining) { lastX = remaining.x; lastY = remaining.y; }
+    };
     canvas.addEventListener("pointerdown",onDown);canvas.addEventListener("pointermove",onMove);canvas.addEventListener("pointerup",onUp);canvas.addEventListener("pointercancel",onUp);
     const resize = () => { const w=Math.max(1,wrap.clientWidth),h=Math.max(1,wrap.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize);observer.observe(wrap);resize();
