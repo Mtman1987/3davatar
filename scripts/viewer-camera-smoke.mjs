@@ -26,6 +26,7 @@ try {
   // button lookup or click is needed, so the test starts the useful work immediately.
   // Wait for response headers; TanStack Start may delay DOMContentLoaded in CI.
   // The explicit UI/canvas checks below verify that the app actually becomes usable.
+  console.log("Opening viewer with cameraSmoke=1");
   await page.goto("http://127.0.0.1:8080/?cameraSmoke=1", { waitUntil: "commit", timeout: 10_000 });
   try {
     await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 90_000 });
