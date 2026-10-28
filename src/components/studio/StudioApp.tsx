@@ -104,6 +104,15 @@ export function StudioApp() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("cameraSmoke") !== "1" || smokeStarted.current) return;
     smokeStarted.current = true;
+    // Enter the studio immediately so a slow sample/MediaPipe load cannot leave
+    // the SSR home screen visible throughout the browser smoke test.
+    patch({
+      screen: "studio",
+      panel: "face",
+      status: "working",
+      statusText: "Loading sample portrait…",
+      error: null,
+    });
     void useSample();
   }, []);
 
