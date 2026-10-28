@@ -686,7 +686,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
           </button>
         ))}
       </div>
-      <Slider label="Head size" min={0.8} max={1.35} step={0.01} value={state.headScale} onChange={(headScale) => state.patch({ headScale })} />
+      <Slider label="Head size" min={0.72} max={1.35} step={0.01} value={state.headScale} onChange={(headScale) => state.patch({ headScale })} />
       <Slider label="Height" min={-0.06} max={0.08} step={0.005} value={state.headY} onChange={(headY) => state.patch({ headY })} />
       <Slider label="Depth" min={-0.04} max={0.1} step={0.005} value={state.headZ} onChange={(headZ) => state.patch({ headZ })} />
       <Slider label="Expression" min={0} max={1.4} step={0.01} value={state.expression} onChange={(expression) => state.patch({ expression })} />
