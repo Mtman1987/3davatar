@@ -12,7 +12,7 @@ type Props = {
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
-  manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onError?: (message: string) => void;
+  manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
 type LoadedModel = { root: THREE.Group; clips: THREE.AnimationClip[]; mixer: THREE.AnimationMixer | null };
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -111,7 +111,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       root.traverse((obj)=>{const mesh=obj as THREE.Mesh; if(mesh.isMesh && mesh.morphTargetDictionary)Object.keys(mesh.morphTargetDictionary).forEach(n=>morphNames.add(n));});
       propsRef.current.onModelInfo?.({morphNames:[...morphNames].sort(),animationNames:clips.map(c=>c.name || "Unnamed animation")});
       setBooted(n=>n+1);
-    },undefined,(error)=>{
+    },(event)=>{propsRef.current.onProgress?.(event.loaded,event.total);},(error)=>{
       if(cancelled)return;
       const detail=error instanceof Error?error.message:"Unknown GLB loading error";
       propsRef.current.onError?.("Failed to load required model "+url+": "+detail);
