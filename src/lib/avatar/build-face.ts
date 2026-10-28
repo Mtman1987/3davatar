@@ -35,7 +35,10 @@ export function buildFace(
   mode: Mode,
 ): BuiltFace {
   const indices = triangulate(landmarks);
-  let positions: Float32Array = layout(landmarks, mode);
+  // MediaPipe landmarks are normalized independently by image width and height.
+  // Convert them back to a common pixel aspect before building 3D coordinates;
+  // otherwise portrait photos compress the face vertically.
+  let positions: Float32Array = layout(landmarks, mode, source.height / Math.max(1, source.width));
   if (mode === "detail") {
     positions = smoothPositions(positions, indices, 2);
     inflateCheeks(positions);
@@ -51,7 +54,7 @@ export function buildFace(
   return { positions, uvs, indices, morphs, influences, texture };
 }
 
-function layout(landmarks: Landmark[], mode: Mode) {
+function layout(landmarks: Landmark[], mode: Mode, verticalAspect = 1) {
   const n = landmarks.length;
   let cx = 0;
   let cy = 0;
@@ -69,7 +72,7 @@ function layout(landmarks: Landmark[], mode: Mode) {
   for (let i = 0; i < n; i++) {
     const lm = landmarks[i]!;
     raw[i * 3] = lm.x - cx;
-    raw[i * 3 + 1] = -(lm.y - cy);
+    raw[i * 3 + 1] = -(lm.y - cy) * verticalAspect;
     raw[i * 3 + 2] = -(lm.z - cz) * zBoost;
   }
   let minX = Infinity;
