@@ -12,7 +12,7 @@ type Props = {
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
-  manualMorphs?: Record<string, number>; onModelInfo?: (info: ModelInfo) => void; onError?: (message: string) => void;
+  manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onError?: (message: string) => void;
 };
 type LoadedModel = { root: THREE.Group; clips: THREE.AnimationClip[]; mixer: THREE.AnimationMixer | null };
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -118,6 +118,15 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     });
     return ()=>{cancelled=true;};
   },[props.modelUrl,props.bodyAsset,props.modelName]);
+
+  useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded?.mixer) return;
+    loaded.mixer.stopAllAction();
+    if (!props.animationPlaying) return;
+    const clip = loaded.clips[props.animationIndex ?? 0];
+    if (clip) loaded.mixer.clipAction(clip).reset().play();
+  }, [props.animationIndex, props.animationPlaying, booted]);
 
   return <div ref={wrapRef} className="h-full w-full" data-viewport-booted={booted} />;
 });
