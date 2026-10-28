@@ -5,6 +5,7 @@ on:
     branches:
       - experiment/mediapipe-face-pipeline
       - experiment/face-fit-json-snapshot
+      - experiment/face-cutout-save-load
   pull_request:
     branches:
       - main
