@@ -5,13 +5,14 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
+import type { FaceFitSnapshot } from "@/lib/avatar/face-fit";
 
-export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
+export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob>; captureFaceFit: () => FaceFitSnapshot | null };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
 type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
-  headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
+  headScale: number; headY: number; headZ: number; expression: number; faceRev: number; faceFitSnapshot?: FaceFitSnapshot | null;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
@@ -31,6 +32,17 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   useImperativeHandle(ref, () => ({
     snapshot: () => { try { return rendererRef.current?.domElement.toDataURL("image/jpeg", 0.72) ?? ""; } catch { return ""; } },
     exportGlb: () => exportGroup(modelRef.current?.root ?? null),
+    captureFaceFit: () => {
+      const mesh = faceMeshRef.current;
+      const loaded = modelRef.current;
+      if (!mesh || !loaded) return null;
+      mesh.updateMatrixWorld(true);
+      const wp = new THREE.Vector3(); const wr = new THREE.Euler(); const ws = new THREE.Vector3();
+      mesh.getWorldPosition(wp); mesh.getWorldQuaternion(new THREE.Quaternion()).normalize();
+      const worldQ = new THREE.Quaternion(); mesh.getWorldQuaternion(worldQ); wr.setFromQuaternion(worldQ, mesh.rotation.order);
+      mesh.getWorldScale(ws);
+      return { version: 1, bodyAsset: propsRef.current.bodyAsset, faceChoice: propsRef.current.faceChoice, parentName: mesh.parent?.name ?? "", position: [mesh.position.x,mesh.position.y,mesh.position.z], rotation: [mesh.rotation.x,mesh.rotation.y,mesh.rotation.z], scale: [mesh.scale.x,mesh.scale.y,mesh.scale.z], worldPosition: [wp.x,wp.y,wp.z], worldRotation: [wr.x,wr.y,wr.z], worldScale: [ws.x,ws.y,ws.z], capturedAt: Date.now() };
+    },
   }));
 
   useEffect(() => {
@@ -291,7 +303,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       disposeFaceMesh(faceMesh);
       if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
     };
-  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, booted]);
+  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, props.faceFitSnapshot, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
