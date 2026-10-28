@@ -156,7 +156,6 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
     const bounds = new THREE.Box3().setFromObject(loaded.root);
     const height = Math.max(0.001, bounds.max.y - bounds.min.y);
-    const faceWidth = 0.19 * props.headScale;
     const textureCanvas = makeFeatheredFaceTexture(built.texture);
     const map = new THREE.CanvasTexture(textureCanvas);
     map.colorSpace = THREE.SRGBColorSpace;
@@ -167,20 +166,24 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     });
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
-    faceMesh.scale.setScalar(props.headScale);
-    faceMesh.position.set(0, bounds.max.y - height * 0.075 + props.headY, bounds.max.z + 0.012 + props.headZ);
+    const rootScale = Math.abs(loaded.root.scale.x) || 1;
+    faceMesh.scale.setScalar(props.headScale / rootScale);
+    const targetY = bounds.max.y - height * 0.075 + props.headY;
+    const targetZ = bounds.max.z + 0.012 + props.headZ;
+    faceMesh.position.set(
+      (0 - loaded.root.position.x) / rootScale,
+      (targetY - loaded.root.position.y) / rootScale,
+      (targetZ - loaded.root.position.z) / rootScale,
+    );
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
     faceMesh.morphTargetInfluences?.forEach((_, i) => {
       faceMesh.morphTargetInfluences![i] = built.influences[i] ?? 0;
     });
     const headBone = findHeadBone(loaded.root);
-    if (headBone) {
-      loaded.root.updateMatrixWorld(true);
-      headBone.attach(faceMesh);
-    } else {
-      loaded.root.add(faceMesh);
-    }
+    loaded.root.add(faceMesh);
+    loaded.root.updateMatrixWorld(true);
+    if (headBone) headBone.attach(faceMesh);
     faceMeshRef.current = faceMesh;
     return () => {
       faceMesh.parent?.remove(faceMesh);
