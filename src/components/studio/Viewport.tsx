@@ -168,20 +168,32 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
     faceMesh.scale.setScalar(props.headScale / rootScale);
-    const targetY = bounds.max.y - height * 0.075 + props.headY;
-    const targetZ = bounds.max.z + 0.012 + props.headZ;
-    faceMesh.position.set(
-      (0 - loaded.root.position.x) / rootScale,
-      (targetY - loaded.root.position.y) / rootScale,
-      (targetZ - loaded.root.position.z) / rootScale,
+
+    // Place the photo face from the actual head joint, not the whole body's
+    // bounding-box front edge (which can be dominated by shoulders/arms).
+    // Compute the desired point in world space first, then convert it to the
+    // model root's local space before attaching; Object3D.attach preserves the
+    // resulting world transform when the head bone becomes the parent.
+    loaded.root.updateMatrixWorld(true);
+    const headBone = findHeadBone(loaded.root);
+    const headWorld = new THREE.Vector3();
+    if (headBone) headBone.getWorldPosition(headWorld);
+    else headWorld.set(
+      (bounds.min.x + bounds.max.x) * 0.5,
+      bounds.max.y - height * 0.12,
+      (bounds.min.z + bounds.max.z) * 0.5,
     );
+    const targetWorld = headWorld.clone();
+    targetWorld.y += height * 0.045 + props.headY;
+    targetWorld.z += height * 0.035 + props.headZ;
+    const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
+    faceMesh.position.copy(targetLocal);
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
     faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
     faceMesh.morphTargetInfluences?.forEach((_, i) => {
       faceMesh.morphTargetInfluences![i] = built.influences[i] ?? 0;
     });
-    const headBone = findHeadBone(loaded.root);
     loaded.root.add(faceMesh);
     loaded.root.updateMatrixWorld(true);
     if (headBone) headBone.attach(faceMesh);
