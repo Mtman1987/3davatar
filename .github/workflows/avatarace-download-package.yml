@@ -1,0 +1,70 @@
+name: Build downloadable AvatarAce test package
+
+on:
+  push:
+    branches:
+      - build/avatarace-download
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify required avatar assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package.json
+          test -s public/models/male-base-mesh-base_male.glb
+          test -s public/models/female-base-mesh-base_female.glb
+          test -s public/models/neon-gamer-facial-v2.glb
+          actual="$(sha256sum public/models/neon-gamer-facial-v2.glb | cut -d' ' -f1)"
+          expected="ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba"
+          test "$actual" = "$expected" || { echo "::error::Commissioned V2 model hash mismatch: $actual"; exit 1; }
+          echo "Commissioned V2 model hash verified: $actual"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run typecheck
+          npm run build
+
+      - name: Package source for local testing
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -r AvatarAce-test-source.zip . \
+            -x ".git/*" "./.git/*" \
+               "node_modules/*" "./node_modules/*" \
+               ".vercel/*" "./.vercel/*" \
+               "dist/*" "./dist/*" \
+               "*.zip" \
+               "HeadlessBody.glb" "./HeadlessBody.glb" \
+               "Meshy_AI_*.glb" "./Meshy_AI_*.glb" \
+               "neon-gamer-facial-v2.glb" "./neon-gamer-facial-v2.glb"
+          test -s AvatarAce-test-source.zip
+          unzip -l AvatarAce-test-source.zip | grep -F "public/models/neon-gamer-facial-v2.glb"
+          unzip -l AvatarAce-test-source.zip | grep -F "public/models/male-base-mesh-base_male.glb"
+          unzip -l AvatarAce-test-source.zip | grep -F "public/models/female-base-mesh-base_female.glb"
+
+      - name: Upload downloadable test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AvatarAce-test-source
+          path: AvatarAce-test-source.zip
+          if-no-files-found: error
+          retention-days: 14
