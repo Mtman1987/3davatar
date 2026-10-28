@@ -388,6 +388,8 @@ function Studio({
       thumb,
       photo: getPendingPhoto(),
       bodyAsset: snap.bodyAsset,
+      modelUrl: snap.modelUrl,
+      modelName: snap.modelName,
       outfit: snap.outfit,
       hair: snap.hair,
       skin: snap.skin,
@@ -414,6 +416,12 @@ function Studio({
           animationPlaying={animationPlaying}
           manualMorphs={morphWeights}
           onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); setMorphWeights({}); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
+          onProgress={(loaded, total) => {
+            const current = useStudio.getState();
+            const name = current.modelName ?? "base model";
+            const progress = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) + "%" : (loaded / (1024 * 1024)).toFixed(1) + " MB loaded";
+            current.patch({ status: "working", statusText: "Loading " + name + "… " + progress });
+          }}
           onError={(msg) => { if (msg) state.patch({ status: "error", statusText: "", error: msg }); }}
           outfit={state.outfit}
           hair={state.hair}
@@ -475,6 +483,7 @@ function Studio({
                 key={panel.id}
                 type="button"
                 className={`flex h-14 flex-col items-center justify-center gap-0.5 text-xs ${on ? "text-primary" : "text-muted"}`}
+                aria-pressed={on}
                 onClick={() => state.patch({ panel: panel.id })}
               >
                 <Icon className="size-4" />
@@ -527,7 +536,7 @@ function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, on
         <select id="commission-animation" className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg" value={Math.min(animationIndex, state.animationNames.length - 1)} onChange={(event) => onAnimationChange(Number(event.target.value))}>
           {state.animationNames.map((name, index) => <option key={index} value={index}>{name}</option>)}
         </select>
-        <button type="button" className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
+        <button type="button" aria-pressed={animationPlaying} className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
       </div>
     ) : null}
     {state.morphNames.length ? (
@@ -572,6 +581,7 @@ function LookPanel() {
             <button
               key={item.id}
               type="button"
+              aria-pressed={hair === item.id}
               className={`h-11 flex-1 rounded-full border ${hair === item.id ? "border-primary bg-surface-2 text-fg" : "border-border text-muted"}`}
               onClick={() => patch({ hair: item.id })}
             >
@@ -588,6 +598,7 @@ function LookPanel() {
               key={item.id}
               type="button"
               aria-label={item.label}
+              aria-pressed={skin === item.id}
               className={`size-11 rounded-full border-2 ${skin === item.id ? "border-primary" : "border-transparent"}`}
               style={{ background: item.swatch }}
               onClick={() => patch({ skin: item.id })}
@@ -649,6 +660,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
             key={id}
             type="button"
             disabled={!state.hasFace}
+            aria-pressed={state.preset === id}
             className={`h-10 flex-1 rounded-full border text-xs disabled:opacity-40 ${state.preset === id ? "border-primary text-fg" : "border-border text-muted"}`}
             onClick={() => state.patch({ preset: id })}
           >
@@ -773,6 +785,7 @@ function Choice({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-pressed={on}
       className={`rounded-2xl border px-3 py-3 text-left disabled:opacity-40 ${on ? "border-primary bg-surface-2" : "border-border bg-bg"}`}
     >
       <span className="block font-medium text-fg">{label}</span>
@@ -808,12 +821,15 @@ function Slider({
 }
 
 async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<void>) {
+  const hasFinishedModel = typeof item.modelUrl === "string" && item.modelUrl.startsWith("/models/");
   useStudio.getState().patch({
     screen: "studio",
-    panel: "face",
+    panel: hasFinishedModel ? "finished" : "face",
     bodyAsset: item.bodyAsset ?? (item.body === "female" ? "female" : "male"),
-    modelUrl: null,
-    modelName: null,
+    modelUrl: hasFinishedModel ? item.modelUrl! : null,
+    modelName: hasFinishedModel ? (item.modelName ?? "Saved finished commission") : null,
+    status: hasFinishedModel ? "working" : "idle",
+    statusText: hasFinishedModel ? "Loading saved finished model…" : "",
     outfit: item.outfit,
     hair: item.hair,
     skin: item.skin,
