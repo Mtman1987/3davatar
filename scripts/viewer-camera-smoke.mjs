@@ -32,8 +32,14 @@ try {
     }, null, 2));
     throw error;
   }
-  await page.waitForFunction(() => document.querySelector("canvas")?.getBoundingClientRect().width > 0, null, { timeout: 20_000 });
-  await page.waitForFunction(() => document.querySelector("[role=status]")?.textContent?.includes("Finding your face") !== true, null, { timeout: 20_000 });
+  await page.waitForFunction(() => document.querySelector("canvas")?.getBoundingClientRect().width > 0, null, { timeout: 30_000 });
+  // A visible canvas alone is not enough: don't screenshot until MediaPipe has
+  // actually completed and enabled the face presets. This validates the real
+  // photo pipeline instead of capturing an empty or still-loading viewer.
+  await page.waitForFunction(() => {
+    const standard = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Standard");
+    return standard instanceof HTMLButtonElement && !standard.disabled;
+  }, null, { timeout: 90_000 });
 
   const results = [];
   for (const body of ["Male", "Female"]) {
