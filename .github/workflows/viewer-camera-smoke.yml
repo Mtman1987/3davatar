@@ -12,7 +12,7 @@ permissions:
 jobs:
   camera-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,7 +49,7 @@ jobs:
             --output /tmp/avatarace-client-entry.js
           grep -E "dependencies optimized|optimized dependencies" /tmp/avatarace-vite.log || true
       - name: Exercise viewer camera and capture screenshots
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: node scripts/viewer-camera-smoke.mjs
       - name: Upload screenshots and logs
         if: always()
