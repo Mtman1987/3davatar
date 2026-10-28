@@ -410,7 +410,6 @@ function Studio({
           modelUrl={state.modelUrl}
           modelName={state.modelName}
           sampleTracking={() => null}
-          manualMorphs={{}}
           animationIndex={animationIndex}
           animationPlaying={animationPlaying}
           manualMorphs={morphWeights}
