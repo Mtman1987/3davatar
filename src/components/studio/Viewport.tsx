@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
@@ -120,6 +121,112 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     });
     return ()=>{cancelled=true;};
   },[props.modelUrl,props.bodyAsset,props.modelName]);
+
+  useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded) return;
+    const root = loaded.root;
+    const existing = root.getObjectByName("AvatarAceRealMaleTee");
+    if (existing) {
+      existing.parent?.remove(existing);
+      disposeModel(existing);
+    }
+    // This real MakeHuman garment is a male-base fit test only. Never add it to
+    // the commissioned/view-only model or silently substitute procedural clothing.
+    if (props.modelUrl || props.bodyAsset !== "male" || props.outfit !== "tee") return;
+
+    let cancelled = false;
+    const objLoader = new OBJLoader();
+    const textureLoader = new THREE.TextureLoader();
+    objLoader.load("/models/clothing/male-shirt/crude_male_shirt.obj", (shirt) => {
+      if (cancelled || modelRef.current?.root !== root) {
+        disposeModel(shirt);
+        return;
+      }
+      shirt.name = "AvatarAceRealMaleTee";
+      const sourceBounds = new THREE.Box3().setFromObject(shirt);
+      if (sourceBounds.isEmpty()) {
+        propsRef.current.onError?.("The real male shirt OBJ loaded without usable geometry.");
+        disposeModel(shirt);
+        return;
+      }
+      const sourceSize = sourceBounds.getSize(new THREE.Vector3());
+      const sourceCenter = sourceBounds.getCenter(new THREE.Vector3());
+      root.updateMatrixWorld(true);
+      const bodyBounds = new THREE.Box3().setFromObject(root);
+      const bodySize = bodyBounds.getSize(new THREE.Vector3());
+      if (bodyBounds.isEmpty() || sourceSize.y <= 0 || bodySize.y <= 0) {
+        propsRef.current.onError?.("Could not calculate body and shirt bounds for the real-shirt fit.");
+        disposeModel(shirt);
+        return;
+      }
+
+      // The MakeHuman OBJ is Y-up. Fit its height to the torso and use a uniform
+      // scale so its original proportions/UVs stay intact. This is a visual fit
+      // pass; skeletal weights are a separate step and are not fabricated here.
+      const rootScale = Math.abs(root.getWorldScale(new THREE.Vector3()).y) || 1;
+      const localScale = (bodySize.y * 0.40) / sourceSize.y / rootScale;
+      shirt.scale.setScalar(localScale);
+      const targetWorld = new THREE.Vector3(
+        bodyBounds.getCenter(new THREE.Vector3()).x,
+        bodyBounds.min.y + bodySize.y * 0.72,
+        bodyBounds.getCenter(new THREE.Vector3()).z,
+      );
+      const targetLocal = root.worldToLocal(targetWorld.clone());
+      shirt.position.set(
+        targetLocal.x - sourceCenter.x * localScale,
+        targetLocal.y - sourceCenter.y * localScale,
+        targetLocal.z - sourceCenter.z * localScale,
+      );
+
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.88,
+        metalness: 0,
+        side: THREE.DoubleSide,
+      });
+      shirt.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.material = material;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      });
+      root.add(shirt);
+      root.updateMatrixWorld(true);
+
+      textureLoader.load(
+        "/models/clothing/male-shirt/crude_male_tex.png",
+        (texture) => {
+          if (cancelled || modelRef.current?.root !== root) {
+            texture.dispose();
+            return;
+          }
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          material.map = texture;
+          material.needsUpdate = true;
+        },
+        undefined,
+        () => {
+          // Keep the real OBJ visible if its optional texture fails to load.
+          propsRef.current.onError?.("The shirt mesh loaded, but its texture could not be loaded.");
+        },
+      );
+    }, undefined, (error) => {
+      if (cancelled) return;
+      const detail = error instanceof Error ? error.message : "Unknown OBJ loading error";
+      propsRef.current.onError?.("Failed to load the real male shirt OBJ: " + detail);
+    });
+    return () => {
+      cancelled = true;
+      const garment = root.getObjectByName("AvatarAceRealMaleTee");
+      if (garment) {
+        garment.parent?.remove(garment);
+        disposeModel(garment);
+      }
+    };
+  }, [props.outfit, props.modelUrl, props.bodyAsset, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
