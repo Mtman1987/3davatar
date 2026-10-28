@@ -1,119 +1,37 @@
-name: Restore AvatarAce as a normal source tree
+name: Validate AvatarAce source tree
 
 on:
-  push:
-    branches:
-      - work/avatarace-source-tree
-    paths:
-      - .github/workflows/avatarace-source-tree.yml
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  restore-source:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Check out working branch
         uses: actions/checkout@v4
         with:
           ref: work/avatarace-source-tree
-          fetch-depth: 0
-
-      - name: Extract app source from the existing archive
+      - name: Validate required assets without substituting models
         shell: bash
         run: |
           set -euo pipefail
-          test -f grok-workspace.zip || { echo "Expected grok-workspace.zip at repository root"; exit 1; }
-          mkdir -p "$RUNNER_TEMP/avatarace-unpacked"
-          unzip -q grok-workspace.zip -d "$RUNNER_TEMP/avatarace-unpacked"
-          APP_ROOT="$RUNNER_TEMP/avatarace-unpacked/grok-workspace"
-          if [ ! -f "$APP_ROOT/package.json" ]; then
-            APP_ROOT="$(dirname "$(find "$RUNNER_TEMP/avatarace-unpacked" -maxdepth 5 -type f -name package.json -not -path '*/node_modules/*' | head -n 1)")"
-          fi
-          test -n "$APP_ROOT" && test -f "$APP_ROOT/package.json" || { echo "Could not locate the app package.json in the archive"; exit 1; }
-          echo "Restoring app source from: $APP_ROOT"
-          rsync -a \
-            --exclude='.git/' \
-            --exclude='node_modules/' \
-            --exclude='.github/' \
-            --exclude='attachments/' \
-            --exclude='screenshots/' \
-            --exclude='handoff/' \
-            --exclude='artifacts/' \
-            --exclude='.grok/' \
-            --exclude='*.zip' \
-            "$APP_ROOT"/ ./
-
-          mkdir -p public/models
-          for model in male-base-mesh-base_male.glb female-base-mesh-base_female.glb neon-gamer-facial-v2.glb; do
-            target="public/models/$model"
-            if [ ! -s "$target" ] && [ -s "$model" ]; then
-              cp "$model" "$target"
-            fi
-            if [ ! -s "$target" ] && [ "$model" != "neon-gamer-facial-v2.glb" ]; then
-              curl --fail --location --retry 3 \
-                "https://raw.githubusercontent.com/Mtman1987/3davatar/main/$model" \
-                --output "$target"
-            fi
-            # Never substitute the POC for the commissioned v2 asset.
-            if [ ! -s "$target" ]; then
-              found="$(find "$RUNNER_TEMP/avatarace-unpacked" -type f -name "$model" -size +1k -print -quit)"
-              if [ -n "$found" ]; then cp "$found" "$target"; fi
-            fi
-            test -s "$target" || { echo "Required GLB missing or empty: $target"; exit 1; }
-          done
-
-          if [ -f avatarace-patch/face-builder-browser.js ]; then
-            mkdir -p public/avatarace-patch
-            cp avatarace-patch/face-builder-browser.js public/avatarace-patch/face-builder-browser.js
-          fi
-
-          rm -f grok-workspace.zip male-base-mesh-base_male.glb female-base-mesh-base_female.glb neon-gamer-facial-v2.glb neon-gamer-facial-poc.glb
-          rm -rf avatarace-patch attachments screenshots handoff artifacts .grok
           test -f package.json
-          echo "Source files restored; all three non-empty required GLBs are in public/models."
-
-      - name: Commit normal source files to this branch
+          test -s public/models/male-base-mesh-base_male.glb
+          test -s public/models/female-base-mesh-base_female.glb
+          if [ ! -s public/models/neon-gamer-facial-v2.glb ]; then
+            echo "::error::The commissioned neon-gamer-facial-v2.glb is missing. Never substitute neon-gamer-facial-poc.glb."
+            exit 1
+          fi
+          actual="$(sha256sum public/models/neon-gamer-facial-v2.glb | cut -d' ' -f1)"
+          expected="ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba"
+          test "$actual" = "$expected" || { echo "::error::V2 SHA-256 mismatch: $actual"; exit 1; }
+          echo "Verified commissioned V2 asset SHA-256: $actual"
+      - name: Install dependencies and build
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No source changes to commit."
-          else
-            git commit -m "Restore AvatarAce as a normal source tree"
-            git push origin HEAD:work/avatarace-source-tree
-          fi
-
-      - name: Install dependencies and attempt production build
-        id: build
-        shell: bash
-        run: |
-          set +e
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
-          INSTALL_STATUS=$?
-          if [ "$INSTALL_STATUS" -eq 0 ]; then
-            npm run build
-            BUILD_STATUS=$?
-          else
-            BUILD_STATUS=99
-          fi
-          echo "install_status=$INSTALL_STATUS" >> "$GITHUB_OUTPUT"
-          echo "build_status=$BUILD_STATUS" >> "$GITHUB_OUTPUT"
-          if [ "$INSTALL_STATUS" -ne 0 ] || [ "$BUILD_STATUS" -ne 0 ]; then
-            echo "::warning::The source tree will still be committed, but dependency installation/build needs follow-up."
-          fi
-
-      - name: Report result
-        if: always()
-        run: |
-          echo "The working branch is work/avatarace-source-tree."
-          echo "The archive has been unpacked into normal repository files; main has not been changed."
-          echo "Review the build step above before treating this branch as build-verified."
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run build
