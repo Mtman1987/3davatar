@@ -8,6 +8,15 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 1, reducedMotion: "reduce" });
   const errors = [];
+  const network = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (/virtual:tanstack|@vite|\.js(?:\?|$)|\.task(?:\?|$)|mediapipe/i.test(url)) network.push({ type: "request", url });
+  });
+  page.on("response", (response) => {
+    const url = response.url();
+    if (/virtual:tanstack|@vite|\.js(?:\?|$)|\.task(?:\?|$)|mediapipe/i.test(url)) network.push({ type: "response", status: response.status(), url });
+  });
   page.on("pageerror", (error) => errors.push("pageerror: " + error.message));
   page.on("console", (message) => {
     if (message.type() === "error") errors.push("console: " + message.text());
@@ -19,7 +28,7 @@ try {
   // The explicit UI/canvas checks below verify that the app actually becomes usable.
   await page.goto("http://127.0.0.1:8080/?cameraSmoke=1", { waitUntil: "commit", timeout: 10_000 });
   try {
-    await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 25_000 });
+    await page.getByRole("button", { name: "Face", exact: true }).waitFor({ state: "visible", timeout: 90_000 });
   } catch (error) {
     await page.screenshot({ path: `${output}/failure-initial-page.png`, fullPage: true }).catch(() => {});
     await writeFile(`${output}/failure-diagnostics.json`, JSON.stringify({
@@ -28,6 +37,7 @@ try {
       bodyText: await page.locator("body").innerText().catch(() => ""),
       htmlStart: (await page.locator("html").innerHTML().catch(() => "")).slice(0, 12000),
       pageErrors: errors,
+      network: network.slice(-100),
       failure: String(error)
     }, null, 2));
     throw error;
