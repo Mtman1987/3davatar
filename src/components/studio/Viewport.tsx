@@ -162,12 +162,16 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         return;
       }
       const rootScale = Math.abs(root.getWorldScale(new THREE.Vector3()).y) || 1;
-      const scale = (bodySize.y * 0.40) / sourceSize.y / rootScale;
+      // The source tee is oversized relative to AvatarAce's standardized base body.
+      // Reduce the first-pass fit by 18%, and bias its depth back toward the chest
+      // rather than centering it on the full-body bounds (which include feet/head).
+      const scale = ((bodySize.y * 0.40) / sourceSize.y / rootScale) * 0.82;
       shirt.scale.setScalar(scale);
+      const bodyCenter = bodyBounds.getCenter(new THREE.Vector3());
       const target = new THREE.Vector3(
-        bodyBounds.getCenter(new THREE.Vector3()).x,
+        bodyCenter.x,
         bodyBounds.min.y + bodySize.y * 0.72,
-        bodyBounds.getCenter(new THREE.Vector3()).z,
+        bodyCenter.z - bodySize.z * 0.16,
       );
       const local = root.worldToLocal(target.clone());
       shirt.position.set(
