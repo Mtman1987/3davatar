@@ -860,6 +860,7 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
     headY: item.headY,
     headZ: item.headZ,
     expression: item.expression,
+    faceFitSnapshot: item.faceFit ?? null,
     error: null,
   });
   if (!item.photo || hasFinishedModel) return;
