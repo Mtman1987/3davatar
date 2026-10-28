@@ -19,7 +19,12 @@ try {
   });
   page.on("pageerror", (error) => errors.push("pageerror: " + error.message));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push("console: " + message.text());
+    if (message.type() !== "error") return;
+    const text = message.text();
+    // MediaPipe emits this informational XNNPACK delegate notice through the
+    // browser error channel even though CPU inference is working normally.
+    if (text.includes("INFO: Created TensorFlow Lite XNNPACK delegate for CPU.")) return;
+    errors.push("console: " + text);
   });
   page.on("requestfailed", (request) => errors.push("requestfailed: " + request.url() + " — " + (request.failure()?.errorText ?? "unknown")));
   // Test-only query flag enters the actual sample-photo pipeline on app mount. No home-screen
