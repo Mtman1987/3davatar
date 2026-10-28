@@ -68,7 +68,8 @@ try {
   const results = [];
   for (const body of ["Male", "Female"]) {
     await page.getByRole("button", { name: "Body", exact: true }).click();
-    await page.getByRole("button", { name: new RegExp("^" + body + "$") }).click();
+    // Choice buttons include a descriptive subtitle in their accessible name.
+    await page.getByRole("button", { name: new RegExp("^" + body) }).click();
     await page.getByRole("button", { name: "Face", exact: true }).click();
     // Wait for the actual GLB to finish loading (Viewport increments this
     // counter once for renderer boot and again after model load), rather than
