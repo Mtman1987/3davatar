@@ -1,0 +1,4 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { StudioApp } from "@/components/studio/StudioApp";
+
+export const Route = createFileRoute("/")({ component: StudioApp });

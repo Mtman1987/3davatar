@@ -1,0 +1,83 @@
+/** Canonical ARKit 52 names. NVIDIA Audio2Face and VSeeFace write these same weights. */
+export const ARKIT_BLENDSHAPE_NAMES = [
+  "eyeBlinkLeft",
+  "eyeLookDownLeft",
+  "eyeLookInLeft",
+  "eyeLookOutLeft",
+  "eyeLookUpLeft",
+  "eyeSquintLeft",
+  "eyeWideLeft",
+  "eyeBlinkRight",
+  "eyeLookDownRight",
+  "eyeLookInRight",
+  "eyeLookOutRight",
+  "eyeLookUpRight",
+  "eyeSquintRight",
+  "eyeWideRight",
+  "jawForward",
+  "jawLeft",
+  "jawRight",
+  "jawOpen",
+  "mouthClose",
+  "mouthFunnel",
+  "mouthPucker",
+  "mouthRight",
+  "mouthLeft",
+  "mouthSmileLeft",
+  "mouthSmileRight",
+  "mouthFrownLeft",
+  "mouthFrownRight",
+  "mouthDimpleLeft",
+  "mouthDimpleRight",
+  "mouthStretchLeft",
+  "mouthStretchRight",
+  "mouthRollLower",
+  "mouthRollUpper",
+  "mouthShrugLower",
+  "mouthShrugUpper",
+  "mouthPressLeft",
+  "mouthPressRight",
+  "mouthLowerDownLeft",
+  "mouthLowerDownRight",
+  "mouthUpperUpLeft",
+  "mouthUpperUpRight",
+  "browDownLeft",
+  "browDownRight",
+  "browInnerUp",
+  "browOuterUpLeft",
+  "browOuterUpRight",
+  "cheekPuff",
+  "cheekSquintLeft",
+  "cheekSquintRight",
+  "noseSneerLeft",
+  "noseSneerRight",
+  "tongueOut",
+] as const;
+
+export type ArkitName = (typeof ARKIT_BLENDSHAPE_NAMES)[number];
+
+export const ARKIT_INDEX: Record<ArkitName, number> = Object.fromEntries(
+  ARKIT_BLENDSHAPE_NAMES.map((name, index) => [name, index]),
+) as Record<ArkitName, number>;
+
+export type Weights = Partial<Record<ArkitName, number>>;
+
+export const PRESETS: Record<"smile" | "blink" | "wow", Weights> = {
+  smile: {
+    mouthSmileLeft: 0.85,
+    mouthSmileRight: 0.85,
+    eyeSquintLeft: 0.35,
+    eyeSquintRight: 0.35,
+    cheekSquintLeft: 0.3,
+    cheekSquintRight: 0.3,
+  },
+  blink: { eyeBlinkLeft: 1, eyeBlinkRight: 1 },
+  wow: {
+    jawOpen: 0.65,
+    eyeWideLeft: 0.75,
+    eyeWideRight: 0.75,
+    browInnerUp: 0.55,
+    browOuterUpLeft: 0.35,
+    browOuterUpRight: 0.35,
+  },
+};

@@ -1,0 +1,37 @@
+name: Validate AvatarAce source tree
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out working branch
+        uses: actions/checkout@v4
+        with:
+          ref: work/avatarace-source-tree
+      - name: Validate required assets without substituting models
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package.json
+          test -s public/models/male-base-mesh-base_male.glb
+          test -s public/models/female-base-mesh-base_female.glb
+          if [ ! -s public/models/neon-gamer-facial-v2.glb ]; then
+            echo "::error::The commissioned neon-gamer-facial-v2.glb is missing. Never substitute neon-gamer-facial-poc.glb."
+            exit 1
+          fi
+          actual="$(sha256sum public/models/neon-gamer-facial-v2.glb | cut -d' ' -f1)"
+          expected="ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba"
+          test "$actual" = "$expected" || { echo "::error::V2 SHA-256 mismatch: $actual"; exit 1; }
+          echo "Verified commissioned V2 asset SHA-256: $actual"
+      - name: Install dependencies and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm run build
