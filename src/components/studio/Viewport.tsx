@@ -177,6 +177,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     );
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
+    faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
     faceMesh.morphTargetInfluences?.forEach((_, i) => {
       faceMesh.morphTargetInfluences![i] = built.influences[i] ?? 0;
     });
@@ -204,9 +205,9 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   return <div ref={wrapRef} className="h-full w-full" data-viewport-booted={booted} />;
 });
 
-function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
+function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone: THREE.Color | null = null) {
   const swatch = SKINS.find((entry) => entry.id === skinId)?.swatch ?? SKINS[1].swatch;
-  const skinColor = new THREE.Color(swatch);
+  const skinColor = sampledTone ? sampledTone.clone() : new THREE.Color(swatch);
   const excluded = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|cloth|shirt|jacket|shoe|boot|accessor|nail/i;
 
   root.traverse((obj) => {
@@ -336,7 +337,21 @@ function disposeFaceMesh(mesh: THREE.Mesh) {
 
 function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expression: number) {
   root.traverse((obj)=>{
-    const mesh=obj as THREE.Mesh;if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
+    const mesh=obj as THREE.Mesh;
+    if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
+    const isPhotoFace = mesh.name === "AvatarAcePhotoFace";
+    const baseline = isPhotoFace ? mesh.userData.avatarPhotoFaceBaseline as number[] | undefined : undefined;
+    if (isPhotoFace) {
+      // Restore the captured photo expression every frame before applying live drivers.
+      // This prevents sparse Audio2Face/tracking frames from leaving stale jaw/blink weights.
+      for (const name of ARKIT_BLENDSHAPE_NAMES) {
+        const index = mesh.morphTargetDictionary[name];
+        if (index !== undefined) {
+          const base = baseline?.[index] ?? 0;
+          mesh.morphTargetInfluences[index] = clamp(base * expression, 0, 1);
+        }
+      }
+    }
     for(const [name,value] of Object.entries(weights)){
       const index=mesh.morphTargetDictionary[name];
       if(index !== undefined) mesh.morphTargetInfluences[index]=clamp(value*expression,0,1);
