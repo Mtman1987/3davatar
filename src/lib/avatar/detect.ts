@@ -6,6 +6,7 @@ type Landmarker = {
   detect: (image: CanvasImageSource) => {
     faceLandmarks?: Array<Array<{ x: number; y: number; z?: number }>>;
     faceBlendshapes?: Array<{ categories?: Array<{ categoryName?: string; score?: number }> }>;
+    facialTransformationMatrixes?: Array<{ data?: ArrayLike<number>; rows?: number; columns?: number }>;
   };
   close?: () => void;
 };
@@ -24,6 +25,10 @@ async function createLandmarker(gpu: boolean): Promise<Landmarker> {
     runningMode: "IMAGE",
     numFaces: 1,
     outputFaceBlendshapes: true,
+    // MediaPipe can provide the canonical-face-to-detected-face transform.
+    // Keep it with the detection result for reproducible fit diagnostics and
+    // the comparison pipeline rather than discarding this part of its output.
+    outputFacialTransformationMatrixes: true,
   });
   return created as unknown as Landmarker;
 }
@@ -68,7 +73,24 @@ async function detectCanvas(canvas: HTMLCanvasElement, onStatus?: (text: string)
   const categories = result.faceBlendshapes?.[0]?.categories ?? [];
   const standard = buildFace(landmarks, categories, canvas, "standard");
   const detail = buildFace(landmarks, categories, canvas, "detail");
-  setFaceCache({ standard, detail });
+  const matrixData = result.facialTransformationMatrixes?.[0]?.data;
+  const transformMatrix = matrixData ? Array.from(matrixData) : null;
+  setFaceCache({
+    standard,
+    detail,
+    metadata: {
+      detector: "MediaPipe Face Landmarker",
+      landmarkCount: landmarks.length,
+      blendshapeCount: categories.length,
+      sourceWidth: canvas.width,
+      sourceHeight: canvas.height,
+      sourceAspectRatio: canvas.width / Math.max(1, canvas.height),
+      transformMatrix,
+      transformMatrixDimensions: result.facialTransformationMatrixes?.[0]
+        ? [result.facialTransformationMatrixes[0].rows ?? 4, result.facialTransformationMatrixes[0].columns ?? 4]
+        : null,
+    },
+  });
 }
 
 async function fileToCanvas(file: Blob, max: number) {
