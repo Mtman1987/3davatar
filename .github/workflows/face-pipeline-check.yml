@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - experiment/mediapipe-face-pipeline
+      - experiment/face-fit-json-snapshot
   pull_request:
     branches:
       - main
