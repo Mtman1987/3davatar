@@ -1,0 +1,34 @@
+name: Inspect Grok workspace archive
+on:
+  push:
+    branches:
+      - recovery/inspect-grok-workspace
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect archive and extract relevant viewer source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f grok-workspace.zip
+          echo '=== ARCHIVE SOURCE FILE CANDIDATES ==='
+          unzip -Z1 grok-workspace.zip | grep -Ei '(^|/)(StudioApp|Viewport|store)\.(tsx?|jsx?)$|(^|/)package\.json$|(^|/)(README|readme)(\.md)?$' | head -150 || true
+          mkdir -p /tmp/grok-workspace
+          unzip -q grok-workspace.zip -d /tmp/grok-workspace
+          echo '=== MATCHING SOURCE FILES ==='
+          find /tmp/grok-workspace -type f \( -name 'StudioApp.tsx' -o -name 'Viewport.tsx' -o -path '*/lib/avatar/store.ts' \) -print
+          while IFS= read -r file; do
+            echo
+            echo "===== SOURCE FILE: ${file#/tmp/grok-workspace/} ====="
+            sed -n '1,1200p' "$file"
+          done < <(find /tmp/grok-workspace -type f \( -name 'StudioApp.tsx' -o -name 'Viewport.tsx' -o -path '*/lib/avatar/store.ts' \) | sort)
+          echo '=== TOP-LEVEL PROJECT METADATA ==='
+          find /tmp/grok-workspace -maxdepth 3 -type f -name package.json -print | head -20
+          for file in $(find /tmp/grok-workspace -maxdepth 3 -type f -name package.json | head -5); do
+            echo "===== $file ====="
+            cat "$file"
+          done
