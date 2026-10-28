@@ -1,0 +1,7 @@
+node_modules/
+.vercel/
+dist/
+*.zip
+/HeadlessBody.glb
+/Meshy_AI_*.glb
+/neon-gamer-facial-v2.glb

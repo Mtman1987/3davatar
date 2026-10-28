@@ -386,8 +386,10 @@ function Studio({
       createdAt: Date.now(),
       title: snap.modelName ?? `${labelOf(BODY_ASSETS, snap.bodyAsset)} · ${labelOf(OUTFITS, snap.outfit)}`,
       thumb,
-      photo: getPendingPhoto(),
+      photo: snap.modelUrl ? null : getPendingPhoto(),
       bodyAsset: snap.bodyAsset,
+      modelUrl: snap.modelUrl,
+      modelName: snap.modelName,
       outfit: snap.outfit,
       hair: snap.hair,
       skin: snap.skin,
@@ -414,6 +416,12 @@ function Studio({
           animationPlaying={animationPlaying}
           manualMorphs={morphWeights}
           onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); setMorphWeights({}); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
+          onProgress={(loaded, total) => {
+            const current = useStudio.getState();
+            const name = current.modelName ?? "base model";
+            const progress = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) + "%" : (loaded / (1024 * 1024)).toFixed(1) + " MB loaded";
+            current.patch({ status: "working", statusText: "Loading " + name + "… " + progress });
+          }}
           onError={(msg) => { if (msg) state.patch({ status: "error", statusText: "", error: msg }); }}
           outfit={state.outfit}
           hair={state.hair}
@@ -463,7 +471,7 @@ function Studio({
             />
           ) : null}
           {state.panel === "save" ? (
-            <SavePanel note={saveNote} onDownload={() => void download()} onKeep={() => void keep()} />
+            <SavePanel note={saveNote} finishedModel={Boolean(state.modelUrl)} morphCount={state.morphNames.length} onDownload={() => void download()} onKeep={() => void keep()} />
           ) : null}
         </div>
         <nav className="grid grid-cols-6 border-t border-border">
@@ -475,6 +483,7 @@ function Studio({
                 key={panel.id}
                 type="button"
                 className={`flex h-14 flex-col items-center justify-center gap-0.5 text-xs ${on ? "text-primary" : "text-muted"}`}
+                aria-pressed={on}
                 onClick={() => state.patch({ panel: panel.id })}
               >
                 <Icon className="size-4" />
@@ -527,7 +536,7 @@ function FinishedPanel({ animationIndex, onAnimationChange, animationPlaying, on
         <select id="commission-animation" className="h-11 w-full rounded-xl border border-border bg-bg px-3 text-sm text-fg" value={Math.min(animationIndex, state.animationNames.length - 1)} onChange={(event) => onAnimationChange(Number(event.target.value))}>
           {state.animationNames.map((name, index) => <option key={index} value={index}>{name}</option>)}
         </select>
-        <button type="button" className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
+        <button type="button" aria-pressed={animationPlaying} className="h-11 w-full rounded-full border border-border" onClick={onToggleAnimation}>{animationPlaying ? "Stop animation" : "Play animation"}</button>
       </div>
     ) : null}
     {state.morphNames.length ? (
@@ -572,6 +581,7 @@ function LookPanel() {
             <button
               key={item.id}
               type="button"
+              aria-pressed={hair === item.id}
               className={`h-11 flex-1 rounded-full border ${hair === item.id ? "border-primary bg-surface-2 text-fg" : "border-border text-muted"}`}
               onClick={() => patch({ hair: item.id })}
             >
@@ -588,6 +598,7 @@ function LookPanel() {
               key={item.id}
               type="button"
               aria-label={item.label}
+              aria-pressed={skin === item.id}
               className={`size-11 rounded-full border-2 ${skin === item.id ? "border-primary" : "border-transparent"}`}
               style={{ background: item.swatch }}
               onClick={() => patch({ skin: item.id })}
@@ -649,6 +660,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
             key={id}
             type="button"
             disabled={!state.hasFace}
+            aria-pressed={state.preset === id}
             className={`h-10 flex-1 rounded-full border text-xs disabled:opacity-40 ${state.preset === id ? "border-primary text-fg" : "border-border text-muted"}`}
             onClick={() => state.patch({ preset: id })}
           >
@@ -737,12 +749,14 @@ function VoicePanel({
   );
 }
 
-function SavePanel({ note, onDownload, onKeep }: { note: string | null; onDownload: () => void; onKeep: () => void }) {
+function SavePanel({ note, finishedModel, morphCount, onDownload, onKeep }: { note: string | null; finishedModel: boolean; morphCount: number; onDownload: () => void; onKeep: () => void }) {
   return (
     <div className="space-y-3">
       <h2 className="font-display text-xl text-fg">Your avatar is ready</h2>
       <p className="text-sm text-pretty text-muted">
-        The file includes the 52 face expressions, so it can move in StreamWeaver, VSeeFace, Unity, or from an Audio2Face stream.
+        {finishedModel
+          ? `The commissioned model is preserved as supplied, with ${morphCount} embedded facial morph targets and its included animations.`
+          : "The generated avatar includes the 52 face expressions, so it can move in StreamWeaver, VSeeFace, Unity, or from an Audio2Face stream."}
       </p>
       <button type="button" className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary font-medium text-primary-fg" onClick={onDownload}>
         <Download className="size-4" /> Download GLB
@@ -773,6 +787,7 @@ function Choice({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-pressed={on}
       className={`rounded-2xl border px-3 py-3 text-left disabled:opacity-40 ${on ? "border-primary bg-surface-2" : "border-border bg-bg"}`}
     >
       <span className="block font-medium text-fg">{label}</span>
@@ -808,12 +823,15 @@ function Slider({
 }
 
 async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<void>) {
+  const hasFinishedModel = typeof item.modelUrl === "string" && item.modelUrl.startsWith("/models/");
   useStudio.getState().patch({
     screen: "studio",
-    panel: "face",
+    panel: hasFinishedModel ? "finished" : "face",
     bodyAsset: item.bodyAsset ?? (item.body === "female" ? "female" : "male"),
-    modelUrl: null,
-    modelName: null,
+    modelUrl: hasFinishedModel ? item.modelUrl! : null,
+    modelName: hasFinishedModel ? (item.modelName ?? "Saved finished commission") : null,
+    status: hasFinishedModel ? "working" : "idle",
+    statusText: hasFinishedModel ? "Loading saved finished model…" : "",
     outfit: item.outfit,
     hair: item.hair,
     skin: item.skin,
@@ -824,7 +842,16 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
     expression: item.expression,
     error: null,
   });
-  if (!item.photo) return;
-  const res = await fetch(item.photo);
-  await takePhoto(await res.blob());
+  if (!item.photo || hasFinishedModel) return;
+  try {
+    const res = await fetch(item.photo);
+    if (!res.ok) throw new Error("The saved photo is no longer available.");
+    await takePhoto(await res.blob());
+  } catch {
+    useStudio.getState().patch({
+      status: "error",
+      statusText: "",
+      error: "This saved avatar's photo could not be restored. Its saved settings are still available.",
+    });
+  }
 }

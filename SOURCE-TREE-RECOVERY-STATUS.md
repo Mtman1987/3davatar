@@ -1,20 +1,36 @@
-# AvatarAce source-tree recovery status
+# AvatarAce integration and pre-test status
 
-Branch: `work/avatarace-source-tree`
+## Current integrated baseline
 
-This branch converts the repository's `grok-workspace.zip` into a normal checked-in source tree. It places the two generic base-body GLBs under `public/models/`. The commissioned v2 asset must be sourced from the actual `neon-gamer-facial-v2.glb`, never from the POC.
+This work is based on `main` at commit `6b8b95d62473f9635b2d6c9bba1a5139bc241559`, which already contains the real GLB viewer, finished-commission selection, facial morph preview controls, and embedded animation playback. This branch adds the remaining known application fixes before a user test.
 
-## Important: recovery branch, not merge-ready
+## Finished-model rules
 
-- The source extracted from the repository archive is older than the user's latest local Termux workspace at `~/AvatarAce`.
-- `src/components/studio/Viewport.tsx` is still the procedural-body implementation. The male/female GLBs are present, but **the GLB body selector and face attachment are not yet wired in**.
-- **Incorrect asset identified:** the previous workflow copied `neon-gamer-facial-poc.glb` into the `neon-gamer-facial-v2.glb` path. That was the wrong commission. The POC is not v2. The actual commissioned file is `neon-gamer-facial-v2.glb` from the user's latest local workspace (SHA-256 `ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba`). The branch copy must be replaced with that exact file; do not modify, regenerate, or re-export it. The workflow no longer has permission to substitute the POC.
-- Do not blindly apply the archived `previous-body-integration-patch.zip`: its diff removes existing imported animation playback, live face tracking, and manual morph controls. Preserve existing speech/audio, photo detection, face generation, expressions, textures, and finished-model preview when porting the body loader.
-- The root `main` branch has not been changed by this recovery.
+- The commissioned asset is `public/models/neon-gamer-facial-v2.glb` (SHA-256 `ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba`). Do not regenerate, re-export, substitute, or otherwise alter it.
+- The generic male and female base models are separate assets under `public/models/`.
+- The finished commission is a separate, view-only route; it must not be replaced by the generic base-body/photo-face flow.
+- Saved finished commissions now retain their model URL/name and reopen into the finished-model panel. Legacy/damaged save records are normalized and invalid saved photos are handled without an uncaught rejection.
+- GLB download progress is surfaced in the studio; selected states are announced with `aria-pressed`.
 
-## Required next work
+## Known asset limitation — not silently papered over
 
-1. Compare this source tree with the latest local `~/AvatarAce` before treating it as authoritative.
-2. Port the existing finished-model viewer and morph-relative fix, then add male/female body selection and attach the generated face to a measured `HeadAnchor`.
-3. Keep the commissioned finished model view-only and keep it separate from the generic body/photo-face flow.
-4. Run typecheck/build and verify the actual viewer before opening a merge-ready PR.
+The commissioned GLB has 43 facial morph targets. The expected nine controls that are absent are the eight `eyeLook*` targets and `tongueOut`. Those targets are not present in the source asset, so the UI cannot create them. Do not claim a 52-target face, and do not modify the commissioned GLB to fabricate them. Resolving this requires an authoritative rigged source asset/export containing those targets or an explicit decision to accept the commission as delivered. This is still an open limitation and must be reported before the user is asked to test if those controls are required.
+
+## Cleanup
+
+Tracked Vercel build output, root ZIP artifacts, and duplicate/root GLB copies were removed from this branch. `.gitignore` now excludes build outputs and those root-level artifacts. The runtime assets remain at their intended locations:
+
+- `public/models/neon-gamer-facial-v2.glb`
+- `public/models/male-base-mesh-base_male.glb`
+- `public/models/female-base-mesh-base_female.glb`
+
+## Explicitly deferred
+
+- Outfits remain disabled for the new base bodies until real clothing meshes are available.
+- Multiplayer `p2p.ts` still requires a signaling relay.
+- `build-body.ts` is legacy unused procedural-body code; it is not a source for the finished commission.
+- The IndexedDB database remains named `streamweaver` to avoid orphaning existing saves.
+
+## Validation gate
+
+Before this branch is offered as a test download, GitHub Actions must pass asset verification, dependency installation, typecheck, tests, and production build. A successful build does not replace visual verification of the commissioned model and save/reopen behavior.
