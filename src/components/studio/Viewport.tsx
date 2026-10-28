@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import type { Weights } from "@/lib/avatar/arkit";
+import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
+import { getFaceCache } from "@/lib/avatar/face-cache";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -24,6 +25,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const modelRef = useRef<LoadedModel | null>(null);
+  const faceMeshRef = useRef<THREE.Mesh | null>(null);
   const [booted, setBooted] = useState(0);
 
   useImperativeHandle(ref, () => ({
@@ -124,8 +126,72 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     // The commissioned model is intentionally view-only and must remain untouched.
     const loaded = modelRef.current;
     if (!loaded || props.modelUrl) return;
-    applySkinSuitMaterial(loaded.root, props.skin);
-  }, [props.skin, props.modelUrl, props.bodyAsset, booted]);
+    const face = getFaceCache()?.[props.faceChoice];
+    const sampledTone = face ? sampleSkinTone(face.texture) : null;
+    applySkinSuitMaterial(loaded.root, props.skin, sampledTone);
+  }, [props.skin, props.modelUrl, props.bodyAsset, props.faceRev, props.faceChoice, booted]);
+
+  useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl) return;
+    if (faceMeshRef.current) {
+      faceMeshRef.current.parent?.remove(faceMeshRef.current);
+      disposeFaceMesh(faceMeshRef.current);
+      faceMeshRef.current = null;
+    }
+    const built = props.faceRev > 0 ? getFaceCache()?.[props.faceChoice] : null;
+    if (!built) return;
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(built.positions.slice(), 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(built.uvs.slice(), 2));
+    geometry.setIndex(new THREE.BufferAttribute(built.indices.slice(), 1));
+    geometry.morphAttributes.position = built.morphs.map((delta, index) => {
+      const attribute = new THREE.BufferAttribute(delta.slice(), 3);
+      attribute.name = ARKIT_BLENDSHAPE_NAMES[index] ?? String(index);
+      return attribute;
+    });
+    geometry.morphTargetsRelative = true;
+    geometry.computeVertexNormals();
+
+    const bounds = new THREE.Box3().setFromObject(loaded.root);
+    const height = Math.max(0.001, bounds.max.y - bounds.min.y);
+    const textureCanvas = makeFeatheredFaceTexture(built.texture);
+    const map = new THREE.CanvasTexture(textureCanvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.needsUpdate = true;
+    const material = new THREE.MeshStandardMaterial({
+      map, transparent: true, alphaTest: 0.025, roughness: 0.82, metalness: 0,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const faceMesh = new THREE.Mesh(geometry, material);
+    faceMesh.name = "AvatarAcePhotoFace";
+    const rootScale = Math.abs(loaded.root.scale.x) || 1;
+    faceMesh.scale.setScalar(props.headScale / rootScale);
+    const targetY = bounds.max.y - height * 0.075 + props.headY;
+    const targetZ = bounds.max.z + 0.012 + props.headZ;
+    faceMesh.position.set(
+      (0 - loaded.root.position.x) / rootScale,
+      (targetY - loaded.root.position.y) / rootScale,
+      (targetZ - loaded.root.position.z) / rootScale,
+    );
+    faceMesh.renderOrder = 2;
+    faceMesh.updateMorphTargets();
+    faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
+    faceMesh.morphTargetInfluences?.forEach((_, i) => {
+      faceMesh.morphTargetInfluences![i] = built.influences[i] ?? 0;
+    });
+    const headBone = findHeadBone(loaded.root);
+    loaded.root.add(faceMesh);
+    loaded.root.updateMatrixWorld(true);
+    if (headBone) headBone.attach(faceMesh);
+    faceMeshRef.current = faceMesh;
+    return () => {
+      faceMesh.parent?.remove(faceMesh);
+      disposeFaceMesh(faceMesh);
+      if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
+    };
+  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
@@ -139,9 +205,9 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   return <div ref={wrapRef} className="h-full w-full" data-viewport-booted={booted} />;
 });
 
-function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
+function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone: THREE.Color | null = null) {
   const swatch = SKINS.find((entry) => entry.id === skinId)?.swatch ?? SKINS[1].swatch;
-  const skinColor = new THREE.Color(swatch);
+  const skinColor = sampledTone ? sampledTone.clone() : new THREE.Color(swatch);
   const excluded = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|cloth|shirt|jacket|shoe|boot|accessor|nail/i;
 
   root.traverse((obj) => {
@@ -204,9 +270,88 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId) {
   });
 }
 
+function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
+  let exact: THREE.Bone | null = null;
+  let neck: THREE.Bone | null = null;
+  root.traverse((object) => {
+    const bone = object as THREE.Bone;
+    if (!bone.isBone) return;
+    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
+    if (/^(head|headjoint|mixamorighead|skull)$/.test(name)) exact = bone;
+    else if (!neck && /neck/.test(name)) neck = bone;
+  });
+  return exact ?? neck;
+}
+
+function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
+  const context = source.getContext("2d");
+  if (!context || source.width < 8 || source.height < 8) return null;
+  const x0 = Math.floor(source.width * 0.34), x1 = Math.floor(source.width * 0.66);
+  const y0 = Math.floor(source.height * 0.38), y1 = Math.floor(source.height * 0.66);
+  const pixels = context.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+  let r = 0, g = 0, b = 0, count = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const rr = pixels[i]!, gg = pixels[i + 1]!, bb = pixels[i + 2]!;
+    const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);
+    // Ignore transparent, near-black, and highly saturated background pixels.
+    if (pixels[i + 3]! < 200 || max < 48 || max - min > 105) continue;
+    r += rr; g += gg; b += bb; count++;
+  }
+  if (count < 20) return null;
+  const tone = new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
+  // Keep a little headroom so the body does not inherit a photo's strongest highlight.
+  tone.multiplyScalar(0.92);
+  return tone;
+}
+
+function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width; canvas.height = source.height;
+  const context = canvas.getContext("2d");
+  if (!context) return source;
+  context.drawImage(source, 0, 0);
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  const data = image.data;
+  const cx = canvas.width * 0.5, cy = canvas.height * 0.5;
+  const rx = canvas.width * 0.365, ry = canvas.height * 0.39;
+  const feather = 0.075;
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const i = (y * canvas.width + x) * 4;
+      const nx = (x - cx) / rx, ny = (y - cy) / ry;
+      const distance = Math.sqrt(nx * nx + ny * ny);
+      const alpha = THREE.MathUtils.clamp((1 + feather - distance) / feather, 0, 1);
+      data[i + 3] = Math.round(data[i + 3]! * alpha);
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return canvas;
+}
+
+function disposeFaceMesh(mesh: THREE.Mesh) {
+  mesh.geometry.dispose();
+  const material = mesh.material as THREE.MeshStandardMaterial;
+  material.map?.dispose();
+  material.dispose();
+}
+
 function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expression: number) {
   root.traverse((obj)=>{
-    const mesh=obj as THREE.Mesh;if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
+    const mesh=obj as THREE.Mesh;
+    if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
+    const isPhotoFace = mesh.name === "AvatarAcePhotoFace";
+    const baseline = isPhotoFace ? mesh.userData.avatarPhotoFaceBaseline as number[] | undefined : undefined;
+    if (isPhotoFace) {
+      // Restore the captured photo expression every frame before applying live drivers.
+      // This prevents sparse Audio2Face/tracking frames from leaving stale jaw/blink weights.
+      for (const name of ARKIT_BLENDSHAPE_NAMES) {
+        const index = mesh.morphTargetDictionary[name];
+        if (index !== undefined) {
+          const base = baseline?.[index] ?? 0;
+          mesh.morphTargetInfluences[index] = clamp(base * expression, 0, 1);
+        }
+      }
+    }
     for(const [name,value] of Object.entries(weights)){
       const index=mesh.morphTargetDictionary[name];
       if(index !== undefined) mesh.morphTargetInfluences[index]=clamp(value*expression,0,1);
