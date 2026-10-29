@@ -41,12 +41,15 @@ def main():
     head_world = arm.matrix_world @ head.head_local
 
     # Elliptical facial footprint; separate body-specific width and height.
-    half_width = 0.095 if sex == "male" else 0.083
+    # Smaller opening: the prior candidate removed too much head around
+    # the forehead/jaw corners. Narrow the width and height, preserving more mesh.
+    half_width = 0.078 if sex == "male" else 0.068
     # Blender imports the GLB with Y-up converted to Z-up. The head's height
     # is therefore Blender Z, while GLB +Z-front maps to Blender -Y.
-    z_min = head_world.z - 0.045
-    z_max = head_world.z + (0.105 if sex == "male" else 0.095)
-    y_max = head_world.y - 0.020
+    z_min = head_world.z - 0.030
+    z_max = head_world.z + (0.082 if sex == "male" else 0.074)
+    # Restrict the cut to the front surface so it does not reach as far into the head.
+    y_max = head_world.y - 0.010
     removed = {}
     total_before = total_after = 0
 
@@ -117,7 +120,7 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; preserve straight sides and round only the four corners in Blender X/Z front view",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; reduced opening dimensions; preserve straight sides and round only the four corners in Blender X/Z front view",
         "head_world_position": [round(float(v), 7) for v in head_world],
         "cut_region_world": {
             "x_min": round(float(head_world.x - half_width), 7),
@@ -133,7 +136,7 @@ def main():
         "removed_polygons_by_mesh": removed,
         "total_polygons_before": total_before,
         "total_polygons_after": total_after,
-        "warning": "Experimental rectangular cut with corner-only rounding; no added cover geometry. Inspect visually before use.",
+        "warning": "Experimental smaller, shallower rounded-corner opening; no added cover geometry. Inspect visually before use.",
     }
     report_path = output_path.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
