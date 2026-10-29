@@ -122,8 +122,12 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
       mesh.skeleton.update();
       const source = mesh.geometry;
       const sourcePosition = source.getAttribute("position");
+      const sourceNormal = source.getAttribute("normal");
       const count = sourcePosition.count;
       const skinIndex = source.getAttribute("skinIndex"), skinWeight = source.getAttribute("skinWeight");
+      // A front projection must not paint the temples or back-facing side wall.
+      // Z-depth alone admitted those vertices and stretched the photo sideways.
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
       const headJoints = new Set<number>();
       mesh.skeleton.bones.forEach((bone, index) => {
         let p: THREE.Object3D | null = bone;
@@ -139,9 +143,14 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
         if (headInfluence < 0.4) continue;
         const world = mesh.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
         // +Z is the standardized GLBs' front. Back-of-skull and neck stay intact.
-        if (world.z < headWorld.z + 0.025) continue;
+        if (world.z < headWorld.z + 0.025 || !sourceNormal) continue;
+        // Reject grazing-angle vertices: projecting a 2D portrait onto them
+        // stretches the eye/temple pixels into long horizontal bands in profile.
+        const facing = new THREE.Vector3().fromBufferAttribute(sourceNormal, i).applyMatrix3(normalMatrix).normalize().z;
+        if (facing <= 0.25) continue;
+        const projectionWeight = smooth((facing - 0.25) / 0.4);
         const x = (world.x - origin.x) / scale, y = (world.y - origin.y) / scale;
-        const weight = ovalWeight(face, x, y) * smooth((headInfluence - 0.4) / 0.4);
+        const weight = ovalWeight(face, x, y) * smooth((headInfluence - 0.4) / 0.4) * projectionWeight;
         if (weight <= 1e-5) continue;
         const sample = sampleAt(x, y);
         if (!sample) continue;
