@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Create experimental, non-destructive face-opening GLB candidates with Blender.
 
+Workflow-trigger commit: run the isolated candidate build for review.
+
 The source files are never overwritten. This is an intentionally rough first
 pass using the approved +Z-front assumption and a box around the exact head bone.
 It removes whole polygons only; it does not remesh or weld the boundary.
