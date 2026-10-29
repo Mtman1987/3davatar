@@ -2,6 +2,12 @@ name: Build experimental face-cut candidates
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - experiment/face-cut-candidates
+    paths:
+      - "scripts/cut-face-candidate-blender.py"
+      - ".github/workflows/build-face-cut-candidates.yml"
   pull_request:
     branches:
       - tooling/face-cut-validator
