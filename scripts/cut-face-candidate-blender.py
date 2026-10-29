@@ -2,9 +2,9 @@
 """Create experimental, non-destructive face-opening GLB candidates with Blender.
 
 The source files are never overwritten. The cut is referenced to the exact head
-bone, with a separate forward offset applied only to the cut reference. The
-actual armature and head bone remain unchanged. Whole polygons are removed;
-the boundary is not remeshed or welded.
+bone, with separate forward and downward offsets applied only to the cut
+reference. The actual armature and head bone remain unchanged. Whole polygons
+are removed; the boundary is not remeshed or welded.
 """
 import bpy
 import bmesh
@@ -39,14 +39,15 @@ def main():
     head_world = arm.matrix_world @ head.head_local
 
     # Blender imports GLB Y-up as Z-up; GLB +Z-front maps to Blender -Y.
-    # Keep the bone reference intact and move the cut reference forward.
-    # Blender -Y is the front. Compared with the prior -0.040 candidate,
-    # -0.080 shifts the cutting plane forward by another 0.080 scene units.
-    # This deliberately leaves substantially more space before the ears.
+    # Face POV: forward is away from the ears (negative Blender Y).
+    # Back off half of the last 0.040 forward step: -0.080 -> -0.060.
+    # Also lower the cut reference toward the chin by 1/4 of that step: 0.010.
     half_width = 0.095 if sex == "male" else 0.083
-    forward_offset = -0.080  # scene units; negative Y moves toward the face/front
+    forward_offset = -0.060  # scene units; negative Y moves toward the face/front
+    downward_offset = -0.010  # scene units; negative Z moves toward the chin
     cut_reference = head_world.copy()
     cut_reference.y += forward_offset
+    cut_reference.z += downward_offset
     z_min = cut_reference.z - 0.045
     z_max = cut_reference.z + (0.105 if sex == "male" else 0.095)
     y_max = cut_reference.y - 0.020
@@ -96,11 +97,12 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; forward-offset cut reference to preserve more clearance before ears",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; cut reference moved away from ears and slightly down toward chin",
         "head_bone_world_position_unchanged": [round(float(v), 7) for v in head_world],
         "cut_reference_world": [round(float(v), 7) for v in cut_reference],
         "forward_offset_scene_units": forward_offset,
-        "forward_shift_vs_previous_candidate_scene_units": 0.080,
+        "forward_shift_vs_previous_candidate_scene_units": 0.020,
+        "downward_offset_scene_units": downward_offset,
         "cut_region_world": {
             "x_min": round(float(cut_reference.x - half_width), 7),
             "x_max": round(float(cut_reference.x + half_width), 7),
