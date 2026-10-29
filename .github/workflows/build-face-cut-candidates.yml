@@ -21,14 +21,21 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y blender
-      - name: Generate male and female test candidates
+          sudo apt-get install -y blender python3-numpy
+      - name: Verify NumPy inside Blender Python
         run: |
+          set -e
+          blender -b --python-expr "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); import numpy; print('BLENDER_NUMPY_OK', numpy.__version__, sys.version)"
+      - name: Generate male and female test candidates
+        env:
+          PYTHONPATH: /usr/lib/python3/dist-packages
+        run: |
+          set -e
           mkdir -p artifacts
-          blender -b --python scripts/cut-face-candidate-blender.py -- \
+          blender -b --python-expr "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); import numpy" --python scripts/cut-face-candidate-blender.py -- \
             public/models/male-base-mesh-base_male.glb \
             artifacts/male-face-cut-candidate.glb male
-          blender -b --python scripts/cut-face-candidate-blender.py -- \
+          blender -b --python-expr "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); import numpy" --python scripts/cut-face-candidate-blender.py -- \
             public/models/female-base-mesh-base_female.glb \
             artifacts/female-face-cut-candidate.glb female
       - name: Install audit dependencies
