@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Create experimental, non-destructive face-opening GLB candidates with Blender.
 
-Workflow-trigger commit: run the isolated candidate build for review against the updated tooling-branch workflow.
-The workflow preflights NumPy in Blender's own Python before importing GLB files.
-
-The source files are never overwritten. This is an intentionally rough first
-pass using the approved +Z-front assumption and a box around the exact head bone.
-It removes whole polygons only; it does not remesh or weld the boundary.
+The source files are never overwritten. The cut is referenced to the exact head
+bone, with a separate backward offset applied only to the cut reference. The
+actual armature and head bone remain unchanged. Whole polygons are removed;
+the boundary is not remeshed or welded.
 """
 import bpy
 import bmesh
@@ -40,13 +38,15 @@ def main():
     arm, head = head_hits[0]
     head_world = arm.matrix_world @ head.head_local
 
-    # First-pass facial footprint. +Z is the front as approved by the user.
+    # Blender imports GLB Y-up as Z-up; GLB +Z-front maps to Blender -Y.
+    # Keep the bone reference intact and offset only the cutting reference.
     half_width = 0.095 if sex == "male" else 0.083
-    # Blender imports the GLB with Y-up converted to Z-up. The head's height
-    # is therefore Blender Z, while GLB +Z-front maps to Blender -Y.
-    z_min = head_world.z - 0.045
-    z_max = head_world.z + (0.105 if sex == "male" else 0.095)
-    y_max = head_world.y - 0.020
+    backward_offset = 0.040  # scene units, away from the face/front (+Y in Blender)
+    cut_reference = head_world.copy()
+    cut_reference.y += backward_offset
+    z_min = cut_reference.z - 0.045
+    z_max = cut_reference.z + (0.105 if sex == "male" else 0.095)
+    y_max = cut_reference.y - 0.020
     removed = {}
     total_before = total_after = 0
 
@@ -57,15 +57,12 @@ def main():
         before = len(mesh.polygons)
         total_before += before
         remove_indices = []
-        # Polygon centers and transforms are evaluated in scene/world coordinates.
         for poly in mesh.polygons:
             center = obj.matrix_world @ poly.center
-            if (abs(center.x - head_world.x) <= half_width and
+            if (abs(center.x - cut_reference.x) <= half_width and
                 z_min <= center.z <= z_max and center.y <= y_max):
                 remove_indices.append(poly.index)
         if remove_indices:
-            # Delete through BMesh so UVs, materials, vertex groups and modifiers
-            # are not rebuilt from scratch.
             bpy.ops.object.select_all(action="DESELECT")
             obj.select_set(True)
             bpy.context.view_layer.objects.active = obj
@@ -96,11 +93,13 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid box around exact head bone",
-        "head_world_position": [round(float(v), 7) for v in head_world],
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; separate backward-offset cut reference",
+        "head_bone_world_position_unchanged": [round(float(v), 7) for v in head_world],
+        "cut_reference_world": [round(float(v), 7) for v in cut_reference],
+        "backward_offset_scene_units": backward_offset,
         "cut_region_world": {
-            "x_min": round(float(head_world.x - half_width), 7),
-            "x_max": round(float(head_world.x + half_width), 7),
+            "x_min": round(float(cut_reference.x - half_width), 7),
+            "x_max": round(float(cut_reference.x + half_width), 7),
             "z_min": round(float(z_min), 7),
             "z_max": round(float(z_max), 7),
             "blender_y_max_front_boundary": round(float(y_max), 7),
