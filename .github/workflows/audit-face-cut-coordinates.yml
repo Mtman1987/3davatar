@@ -2,6 +2,14 @@ name: Audit face-cut coordinates
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - experiment/face-cutout-save-load
+    paths:
+      - "scripts/audit-face-cut-coordinates.py"
+      - ".github/workflows/audit-face-cut-coordinates.yml"
+      - "public/models/male-base-mesh-base_male.glb"
+      - "public/models/female-base-mesh-base_female.glb"
 
 permissions:
   contents: read
