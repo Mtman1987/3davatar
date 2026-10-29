@@ -5,13 +5,14 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
+import type { FaceFitSnapshot } from "@/lib/avatar/face-fit";
 
-export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
+export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob>; captureFaceFit: () => FaceFitSnapshot | null };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
 type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
-  headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
+  headScale: number; headY: number; headZ: number; expression: number; faceRev: number; faceFitSnapshot?: FaceFitSnapshot | null;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
@@ -31,6 +32,17 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   useImperativeHandle(ref, () => ({
     snapshot: () => { try { return rendererRef.current?.domElement.toDataURL("image/jpeg", 0.72) ?? ""; } catch { return ""; } },
     exportGlb: () => exportGroup(modelRef.current?.root ?? null),
+    captureFaceFit: () => {
+      const mesh = faceMeshRef.current;
+      const loaded = modelRef.current;
+      if (!mesh || !loaded) return null;
+      mesh.updateMatrixWorld(true);
+      const wp = new THREE.Vector3(); const wr = new THREE.Euler(); const ws = new THREE.Vector3();
+      mesh.getWorldPosition(wp);
+      const worldQ = new THREE.Quaternion(); mesh.getWorldQuaternion(worldQ); wr.setFromQuaternion(worldQ, mesh.rotation.order);
+      mesh.getWorldScale(ws);
+      return { version: 1, bodyAsset: propsRef.current.bodyAsset, faceChoice: propsRef.current.faceChoice, parentName: mesh.parent?.name ?? "", position: [mesh.position.x,mesh.position.y,mesh.position.z] as [number, number, number], rotation: [mesh.rotation.x,mesh.rotation.y,mesh.rotation.z] as [number, number, number], scale: [mesh.scale.x,mesh.scale.y,mesh.scale.z] as [number, number, number], worldPosition: [wp.x,wp.y,wp.z] as [number, number, number], worldRotation: [wr.x,wr.y,wr.z] as [number, number, number], worldScale: [ws.x,ws.y,ws.z] as [number, number, number], capturedAt: Date.now() };
+    },
   }));
 
   useEffect(() => {
@@ -55,14 +67,56 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       camera.lookAt(target);
     };
     placeCamera();
-    const pointers = new Map<number, {x:number;y:number}>(); let lastPinch = 0, lastX = 0, lastY = 0;
-    const onDown = (e: PointerEvent) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); lastX=e.clientX;lastY=e.clientY;lastPinch=0; };
-    const onMove = (e: PointerEvent) => {
-      if (!pointers.has(e.pointerId)) return; pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-      if (pointers.size >= 2) { const [a,b]=[...pointers.values()]; if(!a||!b)return; const d=Math.hypot(a.x-b.x,a.y-b.y); if(lastPinch>0)radius=clamp(radius*lastPinch/Math.max(d,1),0.08,30);lastPinch=d;placeCamera();return; }
-      yaw -= (e.clientX-lastX)*0.008; pitch=clamp(pitch+(e.clientY-lastY)*0.006,0.15,Math.PI-0.15);lastX=e.clientX;lastY=e.clientY;placeCamera();
+    const pointers = new Map<number, {x:number;y:number}>();
+    let lastPinch = 0, lastX = 0, lastY = 0;
+    const onDown = (e: PointerEvent) => {
+      canvas.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      lastX = e.clientX; lastY = e.clientY; lastPinch = 0;
     };
-    const onUp = (e: PointerEvent) => { pointers.delete(e.pointerId);lastPinch=0; };
+    const onMove = (e: PointerEvent) => {
+      const previous = pointers.get(e.pointerId);
+      if (!previous) return;
+      const before = [...pointers.values()];
+      const current = { x: e.clientX, y: e.clientY };
+      pointers.set(e.pointerId, current);
+      if (pointers.size >= 2) {
+        const [a0, b0] = before;
+        const [a1, b1] = [...pointers.values()];
+        if (!a0 || !b0 || !a1 || !b1) return;
+        const oldDistance = Math.hypot(a0.x - b0.x, a0.y - b0.y);
+        const newDistance = Math.hypot(a1.x - b1.x, a1.y - b1.y);
+        if (oldDistance > 0) radius = clamp(radius * oldDistance / Math.max(newDistance, 1), 0.08, 30);
+
+        // Two-finger translation pans the camera target in camera space.
+        // Scale by the visible world height so the gesture feels consistent
+        // across zoom levels and phone/tablet viewport sizes.
+        const midpointBefore = { x: (a0.x + b0.x) * 0.5, y: (a0.y + b0.y) * 0.5 };
+        const midpointAfter = { x: (a1.x + b1.x) * 0.5, y: (a1.y + b1.y) * 0.5 };
+        const dx = midpointAfter.x - midpointBefore.x;
+        const dy = midpointAfter.y - midpointBefore.y;
+        const viewportHeight = Math.max(1, wrap.clientHeight);
+        const worldUnitsPerPixel = (2 * radius * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5))) / viewportHeight;
+        camera.updateMatrixWorld();
+        const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+        const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+        target.addScaledVector(cameraRight, -dx * worldUnitsPerPixel);
+        target.addScaledVector(cameraUp, dy * worldUnitsPerPixel);
+        lastPinch = newDistance;
+        placeCamera();
+        return;
+      }
+      yaw -= (current.x - lastX) * 0.008;
+      pitch = clamp(pitch + (current.y - lastY) * 0.006, 0.15, Math.PI - 0.15);
+      lastX = current.x; lastY = current.y;
+      placeCamera();
+    };
+    const onUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      lastPinch = 0;
+      const remaining = [...pointers.values()][0];
+      if (remaining) { lastX = remaining.x; lastY = remaining.y; }
+    };
     canvas.addEventListener("pointerdown",onDown);canvas.addEventListener("pointermove",onMove);canvas.addEventListener("pointerup",onUp);canvas.addEventListener("pointercancel",onUp);
     const resize = () => { const w=Math.max(1,wrap.clientWidth),h=Math.max(1,wrap.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize);observer.observe(wrap);resize();
@@ -106,7 +160,16 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       const finalBounds=new THREE.Box3().setFromObject(root);const finalSize=finalBounds.getSize(new THREE.Vector3());
       root.position.x-=center.x;root.position.z-=center.z;
       const target=new THREE.Vector3(0,finalBounds.min.y+finalSize.y*0.52,0);
-      camera.position.set(target.x+0.15,target.y+0.12,Math.max(finalSize.y*1.45,0.45));camera.lookAt(target);
+      // Fit the complete avatar into the actual viewport. Multiplying height by
+      // 1.45 clipped the head and feet at the 30° camera FOV, hiding the photo
+      // face even when detection and placement had succeeded.
+      const verticalFov=THREE.MathUtils.degToRad(camera.fov);
+      const horizontalFov=2*Math.atan(Math.tan(verticalFov*0.5)*Math.max(camera.aspect,0.01));
+      const fitHeight=finalSize.y/(2*Math.tan(verticalFov*0.5));
+      const fitWidth=finalSize.x/(2*Math.tan(horizontalFov*0.5));
+      const fitDepth=finalSize.z/(2*Math.tan(verticalFov*0.5));
+      const fitDistance=Math.max(fitHeight,fitWidth,fitDepth,0.45)*1.14;
+      camera.position.set(target.x+0.08,target.y+0.04,fitDistance);camera.lookAt(target);
       const clips=gltf.animations ?? [];const mixer=clips.length?new THREE.AnimationMixer(root):null;
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
@@ -156,7 +219,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
     const bounds = new THREE.Box3().setFromObject(loaded.root);
     const height = Math.max(0.001, bounds.max.y - bounds.min.y);
-    const textureCanvas = makeFeatheredFaceTexture(built.texture);
+    const textureCanvas = makeFeatheredFaceTexture(built.texture, built.uvs);
     const map = new THREE.CanvasTexture(textureCanvas);
     map.colorSpace = THREE.SRGBColorSpace;
     map.needsUpdate = true;
@@ -167,7 +230,14 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
-    faceMesh.scale.setScalar(props.headScale / rootScale);
+    // The base GLB keeps its own skull/jaw underneath this photo-only surface.
+    // Match the head's vertical reach without widening the cheeks; uniform
+    // scaling left the original chin visible below the captured face like a mask.
+    faceMesh.scale.set(
+      props.headScale / rootScale,
+      (props.headScale * 0.98) / rootScale,
+      props.headScale / rootScale,
+    );
 
     // Place the photo face from the actual head joint, not the whole body's
     // bounding-box front edge (which can be dominated by shoulders/arms).
@@ -175,19 +245,38 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     // model root's local space before attaching; Object3D.attach preserves the
     // resulting world transform when the head bone becomes the parent.
     loaded.root.updateMatrixWorld(true);
-    const headBone = findHeadBone(loaded.root);
+    const headBone = requireHeadBone(loaded.root);
     const headWorld = new THREE.Vector3();
-    if (headBone) headBone.getWorldPosition(headWorld);
-    else headWorld.set(
-      (bounds.min.x + bounds.max.x) * 0.5,
-      bounds.max.y - height * 0.12,
-      (bounds.min.z + bounds.max.z) * 0.5,
-    );
+    headBone.getWorldPosition(headWorld);
     const targetWorld = headWorld.clone();
-    targetWorld.y += height * 0.045 + props.headY;
-    targetWorld.z += height * 0.035 + props.headZ;
+    // The normalized base body is about 2 viewer units tall (roughly 72 inches).
+    // Start lower and slightly shorter than the previous trial: the photo
+    // face was sitting too high in the skull and its forehead/chin footprint
+    // extended too far vertically. The Head Y control remains the fine adjuster.
+    targetWorld.y += height * (0.015 - 1 / 72) + props.headY;
+    // Keep the photo surface close to the skull. The former 0.035 + 3/72
+    // offset pushed it roughly 4.3 inches forward on a normalized 6-foot avatar,
+    // which made the reconstructed face read as a floating mask.
+    targetWorld.z += height * 0.015 + props.headZ;
     const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
     faceMesh.position.copy(targetLocal);
+
+    // Normalize photo roll from the detected eye line before attaching the
+    // photo surface to the head. Without this, a slightly tilted source photo
+    // leaves one eye beyond the mask even though the face center is aligned.
+    // MediaPipe's image Y points down; the generated mesh uses Y-up, so this
+    // sign levels the 3D eye line while keeping texture UVs and landmarks paired.
+    const leftEye = [33, 133].map((index) => built.positions.slice(index * 3, index * 3 + 3));
+    const rightEye = [263, 362].map((index) => built.positions.slice(index * 3, index * 3 + 3));
+    const eyeCenter = (points: Float32Array[]) => new THREE.Vector3(
+      points.reduce((sum, point) => sum + point[0]!, 0) / points.length,
+      points.reduce((sum, point) => sum + point[1]!, 0) / points.length,
+      points.reduce((sum, point) => sum + point[2]!, 0) / points.length,
+    );
+    const eyeA = eyeCenter(leftEye);
+    const eyeB = eyeCenter(rightEye);
+    const eyeLineAngle = Math.atan2(eyeB.y - eyeA.y, eyeB.x - eyeA.x);
+    faceMesh.rotation.z = -eyeLineAngle;
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
     faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
@@ -196,14 +285,31 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     });
     loaded.root.add(faceMesh);
     loaded.root.updateMatrixWorld(true);
-    if (headBone) headBone.attach(faceMesh);
+    headBone.attach(faceMesh);
+    // Apply a saved exact fit only to the same generic body and face variant.
+    // A missing/legacy snapshot leaves the computed default placement untouched.
+    const savedFit = props.faceFitSnapshot;
+    if (savedFit && savedFit.version === 1 &&
+      savedFit.bodyAsset === props.bodyAsset &&
+      savedFit.faceChoice === props.faceChoice &&
+      (!savedFit.parentName || savedFit.parentName === (faceMesh.parent?.name ?? ""))) {
+      faceMesh.position.fromArray(savedFit.position);
+      faceMesh.rotation.set(savedFit.rotation[0], savedFit.rotation[1], savedFit.rotation[2]);
+      faceMesh.scale.fromArray(savedFit.scale);
+    }
+    loaded.root.updateMatrixWorld(true);
+    // Hide only the old central nose surface that protrudes through the photo
+    // face. This clones affected geometry and keeps skin indices, weights, and
+    // morph attributes intact; cleanup restores the original geometry.
+    const restoreBaseNose = trimUnderlyingNose(loaded.root, faceMesh, headBone, height);
     faceMeshRef.current = faceMesh;
     return () => {
+      restoreBaseNose();
       faceMesh.parent?.remove(faceMesh);
       disposeFaceMesh(faceMesh);
       if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
     };
-  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, booted]);
+  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, props.faceFitSnapshot, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
@@ -282,61 +388,186 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
   });
 }
 
-function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
-  let exact: THREE.Bone | null = null;
-  let neck: THREE.Bone | null = null;
+function trimUnderlyingNose(
+  root: THREE.Object3D,
+  photoFace: THREE.Mesh,
+  headBone: THREE.Bone,
+  bodyHeight: number,
+): () => void {
+  const restorations: Array<{ mesh: THREE.Mesh; geometry: THREE.BufferGeometry }> = [];
+  // Keep separate facial details, hair, and accessories intact. Trim the base
+  // head surface covered by the photo-face mesh so it cannot poke through.
+  const ignored = /hair|eye|iris|pupil|brow|lash|teeth|tooth|mouth|tongue|gum|jaw|accessor|nail/i;
+  root.updateMatrixWorld(true);
+  photoFace.updateMatrixWorld(true);
+
+  const worldBounds = new THREE.Box3().setFromObject(photoFace);
+  const corners: THREE.Vector3[] = [];
+  for (const x of [worldBounds.min.x, worldBounds.max.x]) {
+    for (const y of [worldBounds.min.y, worldBounds.max.y]) {
+      for (const z of [worldBounds.min.z, worldBounds.max.z]) {
+        corners.push(root.worldToLocal(new THREE.Vector3(x, y, z)));
+      }
+    }
+  }
+  const faceBounds = new THREE.Box3().setFromPoints(corners);
+  const faceWidth = faceBounds.max.x - faceBounds.min.x;
+  const faceHeight = faceBounds.max.y - faceBounds.min.y;
+  if (faceWidth <= 0 || faceHeight <= 0) return () => {};
+
+  const headCenter = new THREE.Vector3();
+  headBone.getWorldPosition(headCenter);
+  root.worldToLocal(headCenter);
+
+  // Add a small margin beyond the face mesh's bounds to prevent edge pokethrough.
+  // Restrict removal to the front surface; preserve skull silhouette, ears, and neck.
+  const marginX = faceWidth * 0.035;
+  const marginY = faceHeight * 0.025;
+  const cutMinX = faceBounds.min.x - marginX;
+  const cutMaxX = faceBounds.max.x + marginX;
+  const cutMinY = faceBounds.min.y - marginY;
+  const cutMaxY = faceBounds.max.y + marginY;
+  const frontZ = headCenter.z + bodyHeight * 0.02;
+
   root.traverse((object) => {
-    const bone = object as THREE.Bone;
-    if (!bone.isBone) return;
-    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
-    if (/^(head|headjoint|mixamorighead|skull)$/.test(name)) exact = bone;
-    else if (!neck && /neck/.test(name)) neck = bone;
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || mesh === photoFace || !mesh.geometry || ignored.test(mesh.name || "")) return;
+    const position = mesh.geometry.getAttribute("position");
+    if (!position || position.count < 3) return;
+
+    mesh.updateMatrixWorld(true);
+    const sourceIndex = mesh.geometry.getIndex();
+    const indexCount = sourceIndex ? sourceIndex.count : position.count;
+    if (indexCount < 3) return;
+    const kept: number[] = [];
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    for (let i = 0; i + 2 < indexCount; i += 3) {
+      const ia = sourceIndex ? sourceIndex.getX(i) : i;
+      const ib = sourceIndex ? sourceIndex.getX(i + 1) : i + 1;
+      const ic = sourceIndex ? sourceIndex.getX(i + 2) : i + 2;
+      a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld);
+      b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld);
+      c.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld);
+      root.worldToLocal(a); root.worldToLocal(b); root.worldToLocal(c);
+      const x = (a.x + b.x + c.x) / 3;
+      const y = (a.y + b.y + c.y) / 3;
+      const z = (a.z + b.z + c.z) / 3;
+      const underPhotoFace = x >= cutMinX && x <= cutMaxX &&
+        y >= cutMinY && y <= cutMaxY && z > frontZ;
+      if (!underPhotoFace) kept.push(ia, ib, ic);
+    }
+    if (kept.length === indexCount) return;
+
+    // Clone and replace only the index: UVs, skin weights, and morph attributes survive.
+    const original = mesh.geometry;
+    const trimmed = original.clone();
+    trimmed.setIndex(kept);
+    mesh.geometry = trimmed;
+    restorations.push({ mesh, geometry: original });
   });
-  return exact ?? neck;
+
+  return () => {
+    for (const { mesh, geometry } of restorations) {
+      mesh.geometry.dispose();
+      mesh.geometry = geometry;
+    }
+  };
+}
+
+/**
+ * The standardized male and female base rigs share this exact bone contract.
+ * Do not infer a head from names, bounds, or the neck chain: a broken rig must
+ * fail validation instead of silently moving the photo face to a different pivot.
+ */
+function requireHeadBone(root: THREE.Object3D): THREE.Bone {
+  const matches: THREE.Bone[] = [];
+  root.traverse((object) => {
+    const candidate = object as THREE.Bone;
+    if (candidate.isBone && candidate.name === "head") matches.push(candidate);
+  });
+  if (matches.length !== 1) {
+    throw new Error(
+      `Avatar rig contract violation: expected exactly one bone named "head"; found ${matches.length}.`,
+    );
+  }
+  return matches[0]!;
 }
 
 function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
   const context = source.getContext("2d");
   if (!context || source.width < 8 || source.height < 8) return null;
-  const x0 = Math.floor(source.width * 0.34), x1 = Math.floor(source.width * 0.66);
-  const y0 = Math.floor(source.height * 0.38), y1 = Math.floor(source.height * 0.66);
-  const pixels = context.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+  // Sample both cheek zones rather than the center of the face, where nose,
+  // lips, nostrils, and shadows can bias the body's skin color much darker.
+  const patches = [
+    { x: 0.27, y: 0.40, w: 0.18, h: 0.20 },
+    { x: 0.55, y: 0.40, w: 0.18, h: 0.20 },
+  ];
   let r = 0, g = 0, b = 0, count = 0;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const rr = pixels[i]!, gg = pixels[i + 1]!, bb = pixels[i + 2]!;
-    const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);
-    // Ignore transparent, near-black, and highly saturated background pixels.
-    if (pixels[i + 3]! < 200 || max < 48 || max - min > 105) continue;
-    r += rr; g += gg; b += bb; count++;
+  for (const patch of patches) {
+    const x = Math.floor(source.width * patch.x);
+    const y = Math.floor(source.height * patch.y);
+    const width = Math.max(1, Math.floor(source.width * patch.w));
+    const height = Math.max(1, Math.floor(source.height * patch.h));
+    const pixels = context.getImageData(x, y, width, height).data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const rr = pixels[i]!, gg = pixels[i + 1]!, bb = pixels[i + 2]!;
+      const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);
+      // Ignore transparent, near-black, and highly saturated background pixels.
+      if (pixels[i + 3]! < 200 || max < 48 || max - min > 105) continue;
+      r += rr; g += gg; b += bb; count++;
+    }
   }
   if (count < 20) return null;
-  const tone = new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
-  // Keep a little headroom so the body does not inherit a photo's strongest highlight.
-  tone.multiplyScalar(0.92);
-  return tone;
+  // Do not darken the sampled tone further; keep the cheek average as the target.
+  return new THREE.Color().setRGB(r / count / 255, g / count / 255, b / count / 255, THREE.SRGBColorSpace);
 }
 
-function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
+const PHOTO_FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+  152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+];
+
+function makeFeatheredFaceTexture(source: HTMLCanvasElement, uvs: Float32Array) {
   const canvas = document.createElement("canvas");
   canvas.width = source.width; canvas.height = source.height;
   const context = canvas.getContext("2d");
   if (!context) return source;
   context.drawImage(source, 0, 0);
-  const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  const data = image.data;
-  const cx = canvas.width * 0.5, cy = canvas.height * 0.5;
-  const rx = canvas.width * 0.365, ry = canvas.height * 0.39;
-  const feather = 0.075;
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width; x++) {
-      const i = (y * canvas.width + x) * 4;
-      const nx = (x - cx) / rx, ny = (y - cy) / ry;
-      const distance = Math.sqrt(nx * nx + ny * ny);
-      const alpha = THREE.MathUtils.clamp((1 + feather - distance) / feather, 0, 1);
-      data[i + 3] = Math.round(data[i + 3]! * alpha);
-    }
-  }
-  context.putImageData(image, 0, 0);
+
+  // Derive the alpha cut from the exact same canonical oval used by the face
+  // mesh, projected through its UVs. A fixed ellipse drifts relative to the
+  // photo crop and can leave opaque corners or cut into the jaw/temples.
+  const mask = document.createElement("canvas");
+  mask.width = canvas.width; mask.height = canvas.height;
+  const maskContext = mask.getContext("2d");
+  if (!maskContext) return canvas;
+  maskContext.fillStyle = "#fff";
+  maskContext.beginPath();
+  PHOTO_FACE_OVAL.forEach((index, pointIndex) => {
+    const u = uvs[index * 2];
+    const v = uvs[index * 2 + 1];
+    if (u === undefined || v === undefined) return;
+    const x = u * mask.width;
+    const y = (1 - v) * mask.height;
+    if (pointIndex === 0) maskContext.moveTo(x, y);
+    else maskContext.lineTo(x, y);
+  });
+  maskContext.closePath();
+  maskContext.fill();
+
+  // Blur only the cutout alpha so the base head skin can blend through the
+  // perimeter. The mesh boundary still defines the maximum face footprint.
+  const featherMask = document.createElement("canvas");
+  featherMask.width = canvas.width; featherMask.height = canvas.height;
+  const featherContext = featherMask.getContext("2d");
+  if (!featherContext) return canvas;
+  featherContext.filter = "blur(18px)";
+  featherContext.drawImage(mask, 0, 0);
+  featherContext.filter = "none";
+
+  context.globalCompositeOperation = "destination-in";
+  context.drawImage(featherMask, 0, 0);
+  context.globalCompositeOperation = "source-over";
   return canvas;
 }
 

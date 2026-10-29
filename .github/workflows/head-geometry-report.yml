@@ -1,0 +1,41 @@
+name: Inspect generic head geometry
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/mediapipe-face-pipeline
+    paths:
+      - ".github/workflows/head-geometry-report.yml"
+      - "scripts/inspect-head-geometry.py"
+      - "public/models/male-base-mesh-base_male.glb"
+      - "public/models/female-base-mesh-base_female.glb"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-heads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out test branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install geometry inspection dependencies
+        run: python -m pip install --disable-pip-version-check numpy trimesh pygltflib
+      - name: Extract male and female body geometry and skeleton metadata
+        run: |
+          python scripts/inspect-head-geometry.py \
+            public/models/male-base-mesh-base_male.glb \
+            public/models/female-base-mesh-base_female.glb
+      - name: Upload geometry report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatarace-head-geometry-report
+          path: head-geometry-report/
+          if-no-files-found: error
+          retention-days: 14

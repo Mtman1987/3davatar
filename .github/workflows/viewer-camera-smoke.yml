@@ -1,0 +1,64 @@
+name: Avatar viewer camera smoke test
+
+on:
+  push:
+    branches:
+      - experiment/mediapipe-face-pipeline
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  camera-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        timeout-minutes: 2
+        run: npm ci
+      - name: Install Chromium
+        timeout-minutes: 2
+        run: npx playwright install --with-deps chromium
+      - name: Start local app
+        timeout-minutes: 1
+        env:
+          VITE_AUTH_ENABLED: "false"
+        run: |
+          npm run dev > /tmp/avatarace-vite.log 2>&1 &
+          echo $! > /tmp/avatarace-vite.pid
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8080/ >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/avatarace-vite.log
+          exit 1
+      - name: Warm up TanStack client bundle
+        timeout-minutes: 1
+        run: |
+          # The first browser navigation was spending ~39 seconds in Vite dependency
+          # optimization, longer than the smoke test's 25-second UI wait. Trigger
+          # that same client-entry compilation before starting the timed browser test.
+          curl --silent --show-error --fail --max-time 55 \
+            http://127.0.0.1:8080/@id/virtual:tanstack-start-dev-client-entry \
+            --output /tmp/avatarace-client-entry.js
+          grep -E "dependencies optimized|optimized dependencies" /tmp/avatarace-vite.log || true
+      - name: Exercise viewer camera and capture screenshots
+        timeout-minutes: 5
+        run: node scripts/viewer-camera-smoke.mjs
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avatarace-camera-smoke
+          path: |
+            test-results/
+            playwright-report/
+            /tmp/avatarace-vite.log
+          if-no-files-found: warn
+          retention-days: 7
