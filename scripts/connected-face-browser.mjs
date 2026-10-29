@@ -38,7 +38,7 @@ try {
   await page.waitForFunction(async()=>{const {useStudio}=await import("/src/lib/avatar/store.ts");return useStudio.getState().faceRev>=2&&document.querySelector("[data-connected-face]");});
   await page.setViewportSize({width:390,height:844});await capture("female-mobile");assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
   await page.reload();await page.waitForFunction(()=>[...document.querySelectorAll("button")].some(b=>b.textContent.includes("Saved")&&Object.keys(b).some(k=>k.startsWith("__reactProps"))));
-  await page.getByRole("button",{name:"Saved",exact:true}).click();
+  await page.getByRole("button",{name:/^Saved/}).click();
   await page.locator("button").filter({hasText:/Female · Hoodie/}).first().click();await page.waitForSelector("[data-connected-face]",{timeout:90000});await capture("save-reopen-mobile");
   assert.deepEqual(errors,[]);fs.writeFileSync("evidence/browser-results.json",JSON.stringify({results,newPhotoRebound:true,saveReopen:true,mobileOverflow:false,pageErrors:errors},null,2));
   console.log(JSON.stringify(results,null,2));
