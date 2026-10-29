@@ -218,18 +218,25 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
-    // Preserve the established face depth baseline: Z = 0.
-    // Do not derive face depth from the full-body bounding box; that pushes
-    // the photo face in front of the head. Keep the user's Z control additive.
+    const headBone = findHeadBone(loaded.root);
     faceMesh.scale.setScalar(props.headScale / rootScale);
     const targetY = bounds.max.y - height * 0.075 + props.headY;
-    const targetZ = props.headZ;
+    // The photo mesh is a surface, not a point. Align its rear-most edge to
+    // the measured front of the skinned head, then leave a tiny skin-safe gap.
+    // This avoids both the buried Z=0 placement and the old full-body max-Z
+    // offset that could push the face far in front of the avatar.
+    geometry.computeBoundingBox();
+    const faceBack = geometry.boundingBox?.min.z ?? 0;
+    const headFront = headBone
+      ? measureHeadFrontZ(loaded.root, headBone, targetY, height)
+      : null;
+    const targetZ = (headFront ?? 0) - (faceBack * props.headScale / rootScale) +
+      height * 0.002 + props.headZ;
     faceMesh.position.set(
       (0 - loaded.root.position.x) / rootScale,
       (targetY - loaded.root.position.y) / rootScale,
       (targetZ - loaded.root.position.z) / rootScale,
     );
-    const headBone = findHeadBone(loaded.root);
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
     faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
@@ -410,6 +417,61 @@ function trimUnderlyingNose(
       mesh.geometry = geometry;
     }
   };
+}
+
+/** Measure the actual forward-facing surface of the head from vertices
+ * weighted to the head bone (including its descendants). Returns world Z.
+ * SkinnedMesh.getVertexPosition applies the current skeleton pose, so this
+ * works with the normalized male and female GLBs without body-specific offsets.
+ */
+function measureHeadFrontZ(
+  root: THREE.Object3D,
+  headBone: THREE.Bone,
+  faceCenterY: number,
+  bodyHeight: number,
+): number | null {
+  root.updateMatrixWorld(true);
+  const headBones = new Set<THREE.Bone>();
+  headBone.traverse((object) => {
+    const bone = object as THREE.Bone;
+    if (bone.isBone) headBones.add(bone);
+  });
+  const headPosition = headBone.getWorldPosition(new THREE.Vector3());
+  const minY = faceCenterY - bodyHeight * 0.085;
+  const maxY = faceCenterY + bodyHeight * 0.085;
+  const maxX = bodyHeight * 0.085;
+  let frontZ = Number.NEGATIVE_INFINITY;
+  const vertex = new THREE.Vector3();
+
+  root.traverse((object) => {
+    const mesh = object as THREE.SkinnedMesh;
+    if (!mesh.isSkinnedMesh || !mesh.skeleton) return;
+    const positions = mesh.geometry.getAttribute("position");
+    const skinIndices = mesh.geometry.getAttribute("skinIndex");
+    const skinWeights = mesh.geometry.getAttribute("skinWeight");
+    if (!positions || !skinIndices || !skinWeights) return;
+    const headIndices = new Set<number>();
+    mesh.skeleton.bones.forEach((bone, index) => {
+      if (headBones.has(bone)) headIndices.add(index);
+    });
+    if (!headIndices.size) return;
+
+    for (let i = 0; i < positions.count; i++) {
+      let headWeight = 0;
+      for (let slot = 0; slot < Math.min(4, skinIndices.itemSize); slot++) {
+        if (headIndices.has(skinIndices.getComponent(i, slot))) {
+          headWeight += skinWeights.getComponent(i, slot);
+        }
+      }
+      if (headWeight < 0.2) continue;
+      mesh.getVertexPosition(i, vertex);
+      vertex.applyMatrix4(mesh.matrixWorld);
+      if (vertex.y < minY || vertex.y > maxY) continue;
+      if (Math.abs(vertex.x - headPosition.x) > maxX) continue;
+      if (vertex.z > frontZ) frontZ = vertex.z;
+    }
+  });
+  return Number.isFinite(frontZ) ? frontZ : null;
 }
 
 function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
