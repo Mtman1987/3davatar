@@ -4,8 +4,8 @@
 Workflow-trigger commit: run the isolated candidate build for review against the updated tooling-branch workflow.
 The workflow preflights NumPy in Blender's own Python before importing GLB files.
 
-The source files are never overwritten. This is an intentionally rough first
-pass using the approved +Z-front assumption and a box around the exact head bone.
+The source files are never overwritten. This is an experimental first pass using an elliptical face-opening footprint
+around the exact head bone.
 It removes whole polygons only; it does not remesh or weld the boundary.
 """
 import bpy
@@ -40,7 +40,7 @@ def main():
     arm, head = head_hits[0]
     head_world = arm.matrix_world @ head.head_local
 
-    # First-pass facial footprint. +Z is the front as approved by the user.
+    # Elliptical facial footprint; separate body-specific width and height.
     half_width = 0.095 if sex == "male" else 0.083
     # Blender imports the GLB with Y-up converted to Z-up. The head's height
     # is therefore Blender Z, while GLB +Z-front maps to Blender -Y.
@@ -58,10 +58,14 @@ def main():
         total_before += before
         remove_indices = []
         # Polygon centers and transforms are evaluated in scene/world coordinates.
+        # Ellipse in the front-view X/Z plane removes the box's square corners.
+        ellipse_center_z = (z_min + z_max) / 2.0
+        half_height = (z_max - z_min) / 2.0
         for poly in mesh.polygons:
             center = obj.matrix_world @ poly.center
-            if (abs(center.x - head_world.x) <= half_width and
-                z_min <= center.z <= z_max and center.y <= y_max):
+            nx = (center.x - head_world.x) / half_width
+            nz = (center.z - ellipse_center_z) / half_height
+            if nx * nx + nz * nz <= 1.0 and center.y <= y_max:
                 remove_indices.append(poly.index)
         if remove_indices:
             # Delete through BMesh so UVs, materials, vertex groups and modifiers
@@ -96,19 +100,23 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid box around exact head bone",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid ellipse in Blender X/Z front view around exact head bone",
         "head_world_position": [round(float(v), 7) for v in head_world],
         "cut_region_world": {
             "x_min": round(float(head_world.x - half_width), 7),
             "x_max": round(float(head_world.x + half_width), 7),
             "z_min": round(float(z_min), 7),
             "z_max": round(float(z_max), 7),
+            "ellipse_center_x": round(float(head_world.x), 7),
+            "ellipse_center_z": round(float((z_min + z_max) / 2.0), 7),
+            "ellipse_radius_x": round(float(half_width), 7),
+            "ellipse_radius_z": round(float((z_max - z_min) / 2.0), 7),
             "blender_y_max_front_boundary": round(float(y_max), 7),
         },
         "removed_polygons_by_mesh": removed,
         "total_polygons_before": total_before,
         "total_polygons_after": total_after,
-        "warning": "Experimental rough cut: whole-polygon centroid filter; inspect visually before use.",
+        "warning": "Experimental elliptical cut using whole-polygon centroid filter; inspect visually before use.",
     }
     report_path = output_path.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
