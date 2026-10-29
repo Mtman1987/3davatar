@@ -4,7 +4,7 @@
 Workflow-trigger commit: run the isolated candidate build for review against the updated tooling-branch workflow.
 The workflow preflights NumPy in Blender's own Python before importing GLB files.
 
-The source files are never overwritten. This is an experimental first pass using an elliptical face-opening footprint
+The source files are never overwritten. This is an experimental first pass using an rounded-rectangle face-opening footprint
 around the exact head bone.
 It removes whole polygons only; it does not remesh or weld the boundary.
 """
@@ -57,15 +57,25 @@ def main():
         before = len(mesh.polygons)
         total_before += before
         remove_indices = []
-        # Polygon centers and transforms are evaluated in scene/world coordinates.
-        # Ellipse in the front-view X/Z plane removes the box's square corners.
-        ellipse_center_z = (z_min + z_max) / 2.0
-        half_height = (z_max - z_min) / 2.0
+        # Rounded-rectangle opening in Blender X/Z front view:
+        # straight top/bottom and sides, with quarter-circle corners.
+        # The corner radius controls only the 2D corner shape; no added cover meshes.
+        corner_radius = min(0.030 if sex == "male" else 0.026, half_width * 0.45, (z_max - z_min) * 0.25)
+        x_min = head_world.x - half_width
+        x_max = head_world.x + half_width
+        corner_z_min = z_min + corner_radius
+        corner_z_max = z_max - corner_radius
+        inner_x_min = x_min + corner_radius
+        inner_x_max = x_max - corner_radius
         for poly in mesh.polygons:
             center = obj.matrix_world @ poly.center
-            nx = (center.x - head_world.x) / half_width
-            nz = (center.z - ellipse_center_z) / half_height
-            if nx * nx + nz * nz <= 1.0 and center.y <= y_max:
+            x, z = center.x, center.z
+            # Rounded rectangle signed-distance test in the front-view plane.
+            qx = abs(x - head_world.x) - (half_width - corner_radius)
+            qz = abs(z - (z_min + z_max) / 2.0) - ((z_max - z_min) / 2.0 - corner_radius)
+            outside_corner = max(qx, 0.0) ** 2 + max(qz, 0.0) ** 2 <= corner_radius ** 2
+            inside_core = qx <= 0.0 or qz <= 0.0
+            if (inside_core or outside_corner) and z >= z_min and z <= z_max and abs(x - head_world.x) <= half_width and center.y <= y_max:
                 remove_indices.append(poly.index)
         if remove_indices:
             # Delete through BMesh so UVs, materials, vertex groups and modifiers
@@ -101,17 +111,17 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid ellipse in Blender X/Z front view around exact head bone",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid rounded rectangle in Blender X/Z front view around exact head bone",
         "head_world_position": [round(float(v), 7) for v in head_world],
         "cut_region_world": {
             "x_min": round(float(head_world.x - half_width), 7),
             "x_max": round(float(head_world.x + half_width), 7),
             "z_min": round(float(z_min), 7),
             "z_max": round(float(z_max), 7),
-            "ellipse_center_x": round(float(head_world.x), 7),
-            "ellipse_center_z": round(float((z_min + z_max) / 2.0), 7),
-            "ellipse_radius_x": round(float(half_width), 7),
-            "ellipse_radius_z": round(float((z_max - z_min) / 2.0), 7),
+            "opening_center_x": round(float(head_world.x), 7),
+            "opening_center_z": round(float((z_min + z_max) / 2.0), 7),
+            "opening_half_width": round(float(half_width), 7),
+            "opening_half_height": round(float((z_max - z_min) / 2.0), 7),
             "blender_y_max_front_boundary": round(float(y_max), 7),
         },
         "removed_polygons_by_mesh": removed,
