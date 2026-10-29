@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create experimental, non-destructive face-opening GLB candidates with Blender.
 
-Workflow-trigger commit: run the isolated candidate build for review.
+Workflow-trigger commit: run the isolated candidate build for review against the updated tooling-branch workflow.
 The workflow preflights NumPy in Blender's own Python before importing GLB files.
 
 The source files are never overwritten. This is an intentionally rough first
