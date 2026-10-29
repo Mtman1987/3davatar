@@ -1,0 +1,60 @@
+name: Install approved face-cut bodies
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/mediapipe-face-pipeline
+    paths:
+      - ".github/workflows/install-approved-face-bodies.yml"
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  install-approved-bodies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout viewer branch
+        uses: actions/checkout@v4
+        with:
+          ref: experiment/mediapipe-face-pipeline
+          fetch-depth: 0
+
+      - name: Download approved run 17 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: face-cut-test-candidates
+          repository: ${{ github.repository }}
+          run-id: 40936781335
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: approved-artifact
+
+      - name: Validate and replace viewer body files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s approved-artifact/male-face-cut-candidate.glb
+          test -s approved-artifact/female-face-cut-candidate.glb
+          mkdir -p public/models
+          cp approved-artifact/male-face-cut-candidate.glb public/models/male-base-mesh-base_male.glb
+          cp approved-artifact/female-face-cut-candidate.glb public/models/female-base-mesh-base_female.glb
+          file public/models/male-base-mesh-base_male.glb public/models/female-base-mesh-base_female.glb
+          sha256sum public/models/male-base-mesh-base_male.glb public/models/female-base-mesh-base_female.glb
+          test "$(head -c 4 public/models/male-base-mesh-base_male.glb)" = "glTF"
+          test "$(head -c 4 public/models/female-base-mesh-base_female.glb)" = "glTF"
+
+      - name: Commit approved body replacements
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/models/male-base-mesh-base_male.glb public/models/female-base-mesh-base_female.glb
+          if git diff --cached --quiet; then
+            echo "Approved body files already installed; no commit needed."
+            exit 0
+          fi
+          git commit -m "Install approved run17 male and female body models"
+          git push origin HEAD:experiment/mediapipe-face-pipeline
