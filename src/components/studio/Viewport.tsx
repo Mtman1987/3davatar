@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
+import { bindConnectedFace, type ConnectedFaceBinding } from "@/lib/avatar/connected-face";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -25,7 +26,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const modelRef = useRef<LoadedModel | null>(null);
-  const faceMeshRef = useRef<THREE.Mesh | null>(null);
+  const faceBindingRef = useRef<ConnectedFaceBinding | null>(null);
+  const fitCameraRef = useRef<((center: THREE.Vector3, distance: number) => void) | null>(null);
   const [booted, setBooted] = useState(0);
 
   useImperativeHandle(ref, () => ({
@@ -54,6 +56,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       camera.position.set(target.x + Math.sin(pitch) * Math.sin(yaw) * radius, target.y + Math.cos(pitch) * radius, target.z + Math.sin(pitch) * Math.cos(yaw) * radius);
       camera.lookAt(target);
     };
+    fitCameraRef.current = (center, distance) => { target = center.clone(); radius = distance; yaw = 0.08; pitch = Math.PI / 2 - 0.02; placeCamera(); };
     placeCamera();
     const pointers = new Map<number, {x:number;y:number}>(); let lastPinch = 0, lastX = 0, lastY = 0;
     const onDown = (e: PointerEvent) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); lastX=e.clientX;lastY=e.clientY;lastPinch=0; };
@@ -63,7 +66,9 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       yaw -= (e.clientX-lastX)*0.008; pitch=clamp(pitch+(e.clientY-lastY)*0.006,0.15,Math.PI-0.15);lastX=e.clientX;lastY=e.clientY;placeCamera();
     };
     const onUp = (e: PointerEvent) => { pointers.delete(e.pointerId);lastPinch=0; };
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); radius = clamp(radius * Math.exp(e.deltaY * 0.001), 0.08, 30); placeCamera(); };
     canvas.addEventListener("pointerdown",onDown);canvas.addEventListener("pointermove",onMove);canvas.addEventListener("pointerup",onUp);canvas.addEventListener("pointercancel",onUp);
+    canvas.addEventListener("wheel",onWheel,{passive:false});
     const resize = () => { const w=Math.max(1,wrap.clientWidth),h=Math.max(1,wrap.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize);observer.observe(wrap);resize();
     const clock = new THREE.Clock(); let frame=0;
@@ -71,6 +76,9 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       frame=requestAnimationFrame(loop); const delta=clock.getDelta(); const loaded=modelRef.current; loaded?.mixer?.update(delta);
       const current=propsRef.current; const sound=current.sampleSound(); const tracking=current.sampleTracking?.();
       const allWeights: Record<string,number> = {...(sound ?? {}),...(tracking ?? {}),...(current.manualMorphs ?? {})};
+      if (current.preset === "smile") Object.assign(allWeights, { mouthSmileLeft: 0.8, mouthSmileRight: 0.8 });
+      if (current.preset === "blink") Object.assign(allWeights, { eyeBlinkLeft: 1, eyeBlinkRight: 1 });
+      if (current.preset === "wow") Object.assign(allWeights, { jawOpen: 0.65, eyeWideLeft: 0.7, eyeWideRight: 0.7, browInnerUp: 0.6 });
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       renderer.render(scene,camera);
     };
@@ -78,6 +86,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     return () => {
       cancelAnimationFrame(frame);observer.disconnect();
       canvas.removeEventListener("pointerdown",onDown);canvas.removeEventListener("pointermove",onMove);canvas.removeEventListener("pointerup",onUp);canvas.removeEventListener("pointercancel",onUp);
+      canvas.removeEventListener("wheel",onWheel);fitCameraRef.current=null;
+      faceBindingRef.current?.restore();faceBindingRef.current=null;
       if(modelRef.current){scene.remove(modelRef.current.root);disposeModel(modelRef.current.root);modelRef.current.mixer?.stopAllAction();modelRef.current=null;}
       ground.geometry.dispose();(ground.material as THREE.Material).dispose();renderer.dispose();canvas.remove();
       rendererRef.current=null;sceneRef.current=null;cameraRef.current=null;
@@ -87,6 +97,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   useEffect(() => {
     const scene=sceneRef.current,camera=cameraRef.current;if(!scene||!camera)return;
     let cancelled=false; const url=props.modelUrl ?? bodyUrl(props.bodyAsset);
+    faceBindingRef.current?.restore();faceBindingRef.current=null;
     if(modelRef.current){scene.remove(modelRef.current.root);modelRef.current.mixer?.stopAllAction();disposeModel(modelRef.current.root);modelRef.current=null;}
     propsRef.current.onModelInfo?.({morphNames:[],animationNames:[]});
     propsRef.current.onError?.("");
@@ -106,8 +117,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       const finalBounds=new THREE.Box3().setFromObject(root);const finalSize=finalBounds.getSize(new THREE.Vector3());
       root.position.x-=center.x;root.position.z-=center.z;
       const target=new THREE.Vector3(0,finalBounds.min.y+finalSize.y*0.52,0);
-      camera.position.set(target.x+0.15,target.y+0.12,Math.max(finalSize.y*1.45,0.45));camera.lookAt(target);
+      const fov=THREE.MathUtils.degToRad(camera.fov);
+      const fitDistance=Math.max(finalSize.y/(2*Math.tan(fov/2)),finalSize.x/(2*Math.tan(fov/2)*camera.aspect))*1.12;
+      fitCameraRef.current?.(target,fitDistance);
       const clips=gltf.animations ?? [];const mixer=clips.length?new THREE.AnimationMixer(root):null;
+      root.userData.exportAnimations=clips;
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
       root.traverse((obj)=>{const mesh=obj as THREE.Mesh; if(mesh.isMesh && mesh.morphTargetDictionary)Object.keys(mesh.morphTargetDictionary).forEach(n=>morphNames.add(n));});
@@ -134,76 +148,24 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   useEffect(() => {
     const loaded = modelRef.current;
     if (!loaded || props.modelUrl) return;
-    if (faceMeshRef.current) {
-      faceMeshRef.current.parent?.remove(faceMeshRef.current);
-      disposeFaceMesh(faceMeshRef.current);
-      faceMeshRef.current = null;
-    }
+    faceBindingRef.current?.restore(); faceBindingRef.current = null;
     const built = props.faceRev > 0 ? getFaceCache()?.[props.faceChoice] : null;
     if (!built) return;
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(built.positions.slice(), 3));
-    geometry.setAttribute("uv", new THREE.BufferAttribute(built.uvs.slice(), 2));
-    geometry.setIndex(new THREE.BufferAttribute(built.indices.slice(), 1));
-    geometry.morphAttributes.position = built.morphs.map((delta, index) => {
-      const attribute = new THREE.BufferAttribute(delta.slice(), 3);
-      attribute.name = ARKIT_BLENDSHAPE_NAMES[index] ?? String(index);
-      return attribute;
-    });
-    geometry.morphTargetsRelative = true;
-    geometry.computeVertexNormals();
-
-    const bounds = new THREE.Box3().setFromObject(loaded.root);
-    const height = Math.max(0.001, bounds.max.y - bounds.min.y);
-    const textureCanvas = makeFeatheredFaceTexture(built.texture);
-    const map = new THREE.CanvasTexture(textureCanvas);
-    map.colorSpace = THREE.SRGBColorSpace;
-    map.needsUpdate = true;
-    const material = new THREE.MeshStandardMaterial({
-      map, transparent: true, alphaTest: 0.025, roughness: 0.82, metalness: 0,
-      side: THREE.DoubleSide, depthWrite: false,
-    });
-    const faceMesh = new THREE.Mesh(geometry, material);
-    faceMesh.name = "AvatarAcePhotoFace";
-    const rootScale = Math.abs(loaded.root.scale.x) || 1;
-    faceMesh.scale.setScalar(props.headScale / rootScale);
-
-    // Place the photo face from the actual head joint, not the whole body's
-    // bounding-box front edge (which can be dominated by shoulders/arms).
-    // Compute the desired point in world space first, then convert it to the
-    // model root's local space before attaching; Object3D.attach preserves the
-    // resulting world transform when the head bone becomes the parent.
-    loaded.root.updateMatrixWorld(true);
-    const headBone = findHeadBone(loaded.root);
-    const headWorld = new THREE.Vector3();
-    if (headBone) headBone.getWorldPosition(headWorld);
-    else headWorld.set(
-      (bounds.min.x + bounds.max.x) * 0.5,
-      bounds.max.y - height * 0.12,
-      (bounds.min.z + bounds.max.z) * 0.5,
-    );
-    const targetWorld = headWorld.clone();
-    targetWorld.y += height * 0.045 + props.headY;
-    targetWorld.z += height * 0.035 + props.headZ;
-    const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
-    faceMesh.position.copy(targetLocal);
-    faceMesh.renderOrder = 2;
-    faceMesh.updateMorphTargets();
-    faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
-    faceMesh.morphTargetInfluences?.forEach((_, i) => {
-      faceMesh.morphTargetInfluences![i] = built.influences[i] ?? 0;
-    });
-    loaded.root.add(faceMesh);
-    loaded.root.updateMatrixWorld(true);
-    if (headBone) headBone.attach(faceMesh);
-    faceMeshRef.current = faceMesh;
+    let binding: ConnectedFaceBinding;
+    try {
+      binding = bindConnectedFace(loaded.root, built, { headScale: props.headScale, headY: props.headY, headZ: props.headZ });
+      faceBindingRef.current = binding;
+      propsRef.current.onError?.("");
+      propsRef.current.onModelInfo?.({ morphNames: binding.report.morphNames, animationNames: loaded.clips.map(c => c.name || "Unnamed animation") });
+    } catch (error) {
+      propsRef.current.onError?.(error instanceof Error ? error.message : "Unable to connect the photo to the head mesh.");
+      return;
+    }
     return () => {
-      faceMesh.parent?.remove(faceMesh);
-      disposeFaceMesh(faceMesh);
-      if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
+      binding.restore();
+      if (faceBindingRef.current === binding) faceBindingRef.current = null;
     };
-  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, booted]);
+  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.skin, props.modelUrl, props.bodyAsset, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
@@ -228,6 +190,7 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
     const sources = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const next = sources.map((source) => {
       if (excluded.test(source.name || "")) return source;
+      if (source.userData.connectedPhotoSkin) return source;
       if (source.userData.avatarSkinSuitMaterial) {
         const existing = source as THREE.MeshStandardMaterial;
         existing.color.copy(skinColor);
@@ -282,19 +245,6 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
   });
 }
 
-function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
-  let exact: THREE.Bone | null = null;
-  let neck: THREE.Bone | null = null;
-  root.traverse((object) => {
-    const bone = object as THREE.Bone;
-    if (!bone.isBone) return;
-    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
-    if (/^(head|headjoint|mixamorighead|skull)$/.test(name)) exact = bone;
-    else if (!neck && /neck/.test(name)) neck = bone;
-  });
-  return exact ?? neck;
-}
-
 function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
   const context = source.getContext("2d");
   if (!context || source.width < 8 || source.height < 8) return null;
@@ -316,50 +266,18 @@ function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
   return tone;
 }
 
-function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
-  const canvas = document.createElement("canvas");
-  canvas.width = source.width; canvas.height = source.height;
-  const context = canvas.getContext("2d");
-  if (!context) return source;
-  context.drawImage(source, 0, 0);
-  const image = context.getImageData(0, 0, canvas.width, canvas.height);
-  const data = image.data;
-  const cx = canvas.width * 0.5, cy = canvas.height * 0.5;
-  const rx = canvas.width * 0.365, ry = canvas.height * 0.39;
-  const feather = 0.075;
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width; x++) {
-      const i = (y * canvas.width + x) * 4;
-      const nx = (x - cx) / rx, ny = (y - cy) / ry;
-      const distance = Math.sqrt(nx * nx + ny * ny);
-      const alpha = THREE.MathUtils.clamp((1 + feather - distance) / feather, 0, 1);
-      data[i + 3] = Math.round(data[i + 3]! * alpha);
-    }
-  }
-  context.putImageData(image, 0, 0);
-  return canvas;
-}
-
-function disposeFaceMesh(mesh: THREE.Mesh) {
-  mesh.geometry.dispose();
-  const material = mesh.material as THREE.MeshStandardMaterial;
-  material.map?.dispose();
-  material.dispose();
-}
-
 function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expression: number) {
   root.traverse((obj)=>{
     const mesh=obj as THREE.Mesh;
     if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
-    const isPhotoFace = mesh.name === "AvatarAcePhotoFace";
-    const baseline = isPhotoFace ? mesh.userData.avatarPhotoFaceBaseline as number[] | undefined : undefined;
-    if (isPhotoFace) {
+    const baseline = mesh.userData.connectedPhotoFaceBaseline as Record<string, number> | undefined;
+    if (baseline) {
       // Restore the captured photo expression every frame before applying live drivers.
       // This prevents sparse Audio2Face/tracking frames from leaving stale jaw/blink weights.
       for (const name of ARKIT_BLENDSHAPE_NAMES) {
         const index = mesh.morphTargetDictionary[name];
         if (index !== undefined) {
-          const base = baseline?.[index] ?? 0;
+          const base = baseline[name] ?? 0;
           mesh.morphTargetInfluences[index] = clamp(base * expression, 0, 1);
         }
       }
@@ -384,5 +302,9 @@ function exportGroup(root: THREE.Object3D | null): Promise<Blob> {
   return new Promise((resolve,reject)=>exporter.parse(root,(result)=>{
     if(result instanceof ArrayBuffer)resolve(new Blob([result],{type:"model/gltf-binary"}));
     else reject(new Error("GLB export returned a non-binary result"));
-  },(error)=>reject(error instanceof Error?error:new Error("GLB export failed")),{binary:true}));
+  },(error)=>reject(error instanceof Error?error:new Error("GLB export failed")),{binary:true,animations:modelAnimations(root)}));
+}
+
+function modelAnimations(root: THREE.Object3D): THREE.AnimationClip[] {
+  return root.userData.exportAnimations ?? [];
 }
