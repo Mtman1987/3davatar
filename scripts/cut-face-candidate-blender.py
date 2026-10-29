@@ -6,6 +6,7 @@ pass using the approved +Z-front assumption and a box around the exact head bone
 It removes whole polygons only; it does not remesh or weld the boundary.
 """
 import bpy
+import bmesh
 import json
 import sys
 from pathlib import Path
@@ -58,13 +59,18 @@ def main():
                 y_min <= center.y <= y_max and center.z >= z_min):
                 remove_indices.append(poly.index)
         if remove_indices:
-            remove_set = set(remove_indices)
-            kept = [p.vertices[:] for p in mesh.polygons if p.index not in remove_set]
-            # Rebuild mesh faces without touching vertex attributes, shape keys, or armature modifiers.
-            # Clear geometry and recreate faces; keep original vertices and vertex groups.
-            mesh.clear_geometry()
-            mesh.from_pydata([v.co[:] for v in mesh.vertices], [], kept)
-            mesh.update()
+            # Delete through BMesh so UVs, materials, vertex groups and modifiers
+            # are not rebuilt from scratch.
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode="EDIT")
+            bm = bmesh.from_edit_mesh(mesh)
+            bm.faces.ensure_lookup_table()
+            doomed = [bm.faces[i] for i in remove_indices if i < len(bm.faces)]
+            bmesh.ops.delete(bm, geom=doomed, context="FACES_ONLY")
+            bmesh.update_edit_mesh(mesh, loop_triangles=True, destructive=True)
+            bpy.ops.object.mode_set(mode="OBJECT")
             removed[obj.name] = len(remove_indices)
         total_after += len(mesh.polygons)
 
