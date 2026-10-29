@@ -78,6 +78,39 @@ function posedMatrix(mesh: THREE.SkinnedMesh, index: number) {
   return mesh.matrixWorld.clone().multiply(mesh.bindMatrixInverse).multiply(sum).multiply(mesh.bindMatrix);
 }
 
+/** Measure the same front-facing, head-weighted width used by face transfer. */
+export function measureConnectedHeadWidth(root: THREE.Object3D): number {
+  root.updateMatrixWorld(true);
+  const heads: THREE.Bone[] = [];
+  root.traverse(o => { if ((o as THREE.Bone).isBone && o.name === "head") heads.push(o as THREE.Bone); });
+  if (heads.length !== 1) throw new Error(`Connected face requires one exact head bone; found ${heads.length}.`);
+  const head = heads[0]!;
+  const headWorld = head.getWorldPosition(new THREE.Vector3());
+  let minX = Infinity, maxX = -Infinity;
+  const candidates: THREE.SkinnedMesh[] = [];
+  root.traverse(o => { const mesh=o as THREE.SkinnedMesh; if(mesh.isSkinnedMesh && mesh.geometry.getAttribute("skinIndex")) candidates.push(mesh); });
+  for (const mesh of candidates) {
+    const si=mesh.geometry.getAttribute("skinIndex"), sw=mesh.geometry.getAttribute("skinWeight"), normal=mesh.geometry.getAttribute("normal");
+    if (!si || !sw || !normal) continue;
+    const normalMatrix=new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+    const joints=new Set<number>();
+    mesh.skeleton.bones.forEach((bone,index)=>{ for(let p:THREE.Object3D|null=bone;p;p=p.parent) if(p===head){joints.add(index);break;} });
+    for(let i=0;i<mesh.geometry.getAttribute("position").count;i++){
+      let influence=0;
+      for(let k=0;k<4;k++) if(joints.has(si.getComponent(i,k))) influence+=sw.getComponent(i,k);
+      if(influence<0.4) continue;
+      const world=mesh.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+      if(world.z<headWorld.z+0.025) continue;
+      const facing=new THREE.Vector3().fromBufferAttribute(normal,i).applyMatrix3(normalMatrix).normalize().z;
+      if(facing<=0.25) continue;
+      minX=Math.min(minX,world.x);maxX=Math.max(maxX,world.x);
+    }
+  }
+  const width=maxX-minX;
+  if(!(width>0&&Number.isFinite(width))) throw new Error("Connected face: unable to measure the existing front-facing head width.");
+  return width;
+}
+
 /**
  * Photo -> existing skin vertices/UVs/morphs. No overlay, cuts, reindexing, new
  * vertices, bone reparenting, or binary asset edits. Owned clones are reversible.
