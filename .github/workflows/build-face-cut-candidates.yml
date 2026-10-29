@@ -21,9 +21,12 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y blender
+          sudo apt-get install -y blender python3-numpy
       - name: Generate male and female test candidates
+        env:
+          PYTHONPATH: /usr/lib/python3/dist-packages
         run: |
+          set -e
           mkdir -p artifacts
           blender -b --python scripts/cut-face-candidate-blender.py -- \
             public/models/male-base-mesh-base_male.glb \
