@@ -57,25 +57,31 @@ def main():
         before = len(mesh.polygons)
         total_before += before
         remove_indices = []
-        # Rounded-rectangle opening in Blender X/Z front view:
-        # straight top/bottom and sides, with quarter-circle corners.
-        # The corner radius controls only the 2D corner shape; no added cover meshes.
+        # Round only the four corners of the rectangular face opening.
+        # Preserve the straight middle sections, but don't remove head polygons
+        # in the corner wedges: this avoids the sharp profile notches/triangles.
         corner_radius = min(0.030 if sex == "male" else 0.026, half_width * 0.45, (z_max - z_min) * 0.25)
-        x_min = head_world.x - half_width
-        x_max = head_world.x + half_width
-        corner_z_min = z_min + corner_radius
-        corner_z_max = z_max - corner_radius
-        inner_x_min = x_min + corner_radius
-        inner_x_max = x_max - corner_radius
+        center_z = (z_min + z_max) / 2.0
+        half_height = (z_max - z_min) / 2.0
         for poly in mesh.polygons:
             center = obj.matrix_world @ poly.center
             x, z = center.x, center.z
-            # Rounded rectangle signed-distance test in the front-view plane.
-            qx = abs(x - head_world.x) - (half_width - corner_radius)
-            qz = abs(z - (z_min + z_max) / 2.0) - ((z_max - z_min) / 2.0 - corner_radius)
-            outside_corner = max(qx, 0.0) ** 2 + max(qz, 0.0) ** 2 <= corner_radius ** 2
-            inside_core = qx <= 0.0 or qz <= 0.0
-            if (inside_core or outside_corner) and z >= z_min and z <= z_max and abs(x - head_world.x) <= half_width and center.y <= y_max:
+            dx = abs(x - head_world.x)
+            dz = abs(z - center_z)
+            # In the four corner squares, remove only the quarter-circle interior.
+            # Outside those corner squares, retain the original straight-sided cut.
+            in_rect = dx <= half_width and dz <= half_height
+            in_corner_square = dx > (half_width - corner_radius) and dz > (half_height - corner_radius)
+            if not in_rect or center.y > y_max:
+                continue
+            if in_corner_square:
+                cx = half_width - corner_radius
+                cz = half_height - corner_radius
+                corner_distance_sq = (dx - cx) ** 2 + (dz - cz) ** 2
+                # Keep material outside the rounded corner arc; remove only inside.
+                if corner_distance_sq <= corner_radius ** 2:
+                    remove_indices.append(poly.index)
+            else:
                 remove_indices.append(poly.index)
         if remove_indices:
             # Delete through BMesh so UVs, materials, vertex groups and modifiers
@@ -111,7 +117,7 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid rounded rectangle in Blender X/Z front view around exact head bone",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; preserve straight sides and round only the four corners in Blender X/Z front view",
         "head_world_position": [round(float(v), 7) for v in head_world],
         "cut_region_world": {
             "x_min": round(float(head_world.x - half_width), 7),
@@ -127,7 +133,7 @@ def main():
         "removed_polygons_by_mesh": removed,
         "total_polygons_before": total_before,
         "total_polygons_after": total_after,
-        "warning": "Experimental ellipse-only candidate; no added cover geometry. Inspect visually before use.",
+        "warning": "Experimental rectangular cut with corner-only rounding; no added cover geometry. Inspect visually before use.",
     }
     report_path = output_path.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
