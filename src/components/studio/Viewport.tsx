@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
-import { bindConnectedFace, type ConnectedFaceBinding } from "@/lib/avatar/connected-face";
+import { bindConnectedFace, measureConnectedHeadWidth, type ConnectedFaceBinding } from "@/lib/avatar/connected-face";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -17,7 +17,7 @@ type Props = {
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
-type LoadedModel = { root: THREE.Group; clips: THREE.AnimationClip[]; mixer: THREE.AnimationMixer | null };
+type LoadedModel = { root: THREE.Group; clips: THREE.AnimationClip[]; mixer: THREE.AnimationMixer | null; baseScale: THREE.Vector3; basePosition: THREE.Vector3 };
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(props, ref) {
@@ -123,7 +123,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       fitCameraRef.current?.(target,fitDistance);
       const clips=gltf.animations ?? [];const mixer=clips.length?new THREE.AnimationMixer(root):null;
       root.userData.exportAnimations=clips;
-      modelRef.current={root,clips,mixer};scene.add(root);
+      modelRef.current={root,clips,mixer,baseScale:root.scale.clone(),basePosition:root.position.clone()};scene.add(root);
       const morphNames=new Set<string>();
       root.traverse((obj)=>{const mesh=obj as THREE.Mesh; if(mesh.isMesh && mesh.morphTargetDictionary)Object.keys(mesh.morphTargetDictionary).forEach(n=>morphNames.add(n));});
       propsRef.current.onModelInfo?.({morphNames:[...morphNames].sort(),animationNames:clips.map(c=>c.name || "Unnamed animation")});
@@ -150,10 +150,32 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const loaded = modelRef.current;
     if (!loaded || props.modelUrl) return;
     faceBindingRef.current?.restore(); faceBindingRef.current = null;
+    // Always start from the normalized source transform. This makes slider changes,
+    // photo replacement, and save/reopen deterministic rather than cumulative.
+    loaded.root.scale.copy(loaded.baseScale);
+    loaded.root.position.copy(loaded.basePosition);
+    loaded.root.updateMatrixWorld(true);
     const built = props.faceRev > 0 ? getFaceCache()?.[props.faceChoice] : null;
     if (!built) return;
     let binding: ConnectedFaceBinding;
     try {
+      // Face geometry is standardized at 19 cm. Fit the body/head to that ruler,
+      // keeping the feet on the floor and the model centered; never shrink the face.
+      const standardWidth = 0.19;
+      const currentHeadWidth = measureConnectedHeadWidth(loaded.root);
+      const fit = standardWidth / currentHeadWidth;
+      if (!Number.isFinite(fit) || fit < 0.5 || fit > 2) {
+        throw new Error(`Connected face body-fit factor is outside the safe range (${fit.toFixed(3)}).`);
+      }
+      loaded.root.scale.copy(loaded.baseScale).multiplyScalar(fit);
+      loaded.root.position.copy(loaded.basePosition).multiplyScalar(fit);
+      loaded.root.updateMatrixWorld(true);
+      const fittedBounds = new THREE.Box3().setFromObject(loaded.root);
+      const fittedCenter = fittedBounds.getCenter(new THREE.Vector3());
+      loaded.root.position.y -= fittedBounds.min.y;
+      loaded.root.position.x -= fittedCenter.x;
+      loaded.root.position.z -= fittedCenter.z;
+      loaded.root.updateMatrixWorld(true);
       binding = bindConnectedFace(loaded.root, built, { headScale: props.headScale, headY: props.headY, headZ: props.headZ });
       faceBindingRef.current = binding;
       wrapRef.current?.setAttribute("data-connected-face", JSON.stringify(binding.report));
