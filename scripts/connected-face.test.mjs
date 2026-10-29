@@ -63,11 +63,13 @@ for (const sex of ["male", "female"]) {
       assert.deepEqual(mesh.geometry.index?.array,geometry.index?.array);
       for(const name of ["uv","normal","skinIndex","skinWeight"])assert.deepEqual(mesh.geometry.getAttribute(name)?.array,geometry.getAttribute(name)?.array);
       const next=mesh.geometry.getAttribute("position").array;
+      const normals=geometry.getAttribute("normal");
       for(let i=0;i<next.length;i+=3){
         assert.ok(Math.abs(next[i]-position[i])<1e-6);assert.ok(Math.abs(next[i+1]-position[i+1])<1e-6);
         if(next[i+2]!==position[i+2])changed++;
         assert.ok(Number.isFinite(next[i+2]));
         if(position[i+1]<1.3)assert.equal(next[i+2],position[i+2],"body below head remains unchanged");
+        if(normals && normals.getZ(i/3)<=0.25)assert.equal(next[i+2],position[i+2],"grazing-angle side skin must not receive front-photo projection");
       }
     }
     assert.ok(changed>1000);
