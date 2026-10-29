@@ -96,9 +96,9 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
   const candidates: THREE.SkinnedMesh[] = [];
   root.traverse(o => {
     const mesh = o as THREE.SkinnedMesh;
-    // The standard GLBs split eyes/teeth/details into smaller primitives. Only
-    // their connected main body/head skin primitive participates in this transfer.
-    if (mesh.isSkinnedMesh && mesh.name === "base" && mesh.geometry.getAttribute("position").count > 10000) candidates.push(mesh);
+    // Preserve existing eye/lip detail primitives too. Their head skin weights
+    // and spatial overlap decide eligibility; nothing is added or detached.
+    if (mesh.isSkinnedMesh && mesh.geometry.getAttribute("skinIndex")) candidates.push(mesh);
   });
   if (!candidates.length) throw new Error("Connected face: standardized connected skin primitive 'base' is missing.");
   const saved: Array<{ mesh: THREE.SkinnedMesh; geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[]; dictionary?: Record<string, number>; influences?: number[] }> = [];
@@ -148,9 +148,8 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
         samples[i] = sample; blend[i] = weight; worldPositions[i] = world; eligibleZ.push(world.z);
       }
       if (!eligibleZ.length) continue;
-      // Match the photo's cheek plane to the actual front skin, not arms/bounds.
-      eligibleZ.sort((a, b) => a - b);
-      origin.z = eligibleZ[Math.floor(eligibleZ.length * 0.55)]! + THREE.MathUtils.clamp(options.headZ, -0.04, 0.04);
+      // Sculpt onto the existing curved skin, rather than flattening it onto a
+      // photo plane (which exposed eyes and created a forehead shelf).
       const geometry = source.clone();
       const position = geometry.getAttribute("position") as THREE.BufferAttribute;
       const originalMorphs = source.morphAttributes.position ?? [];
@@ -169,10 +168,10 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
         const weight = blend[i]!;
         const inverse = posedMatrix(mesh, i).invert();
         const target = world.clone();
-        const targetZ = origin.z + interpolate(face.positions, 3, 2, sample) * scale;
-        // Bound a bad/angled portrait's displacement while feathering into the
-        // untouched skull. XY remains connected; the original neck is unchanged.
-        target.z += THREE.MathUtils.clamp(targetZ - world.z, -0.065, 0.065) * weight;
+        const relief = interpolate(face.positions, 3, 2, sample) * scale * 0.18;
+        // A single image is not a complete skull reconstruction. Keep original
+        // eye sockets/profile and use bounded photo relief, smoothly blended.
+        target.z += THREE.MathUtils.clamp(relief + options.headZ * 0.2, -0.012, 0.012) * weight;
         const local = target.applyMatrix4(inverse); position.setXYZ(i, local.x, local.y, local.z);
         const direction = new THREE.Matrix3().setFromMatrix4(inverse);
         ARKIT_BLENDSHAPE_NAMES.forEach((name, m) => {
@@ -184,7 +183,9 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
         report.changedVertices++;
       }
       geometry.morphAttributes.position = [...namedMorphs.values()]; geometry.morphTargetsRelative = true;
-      geometry.computeVertexNormals(); geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+      // Retain authored smooth normals across original UV splits; recalculating
+      // each split independently produces faceted seams on these base assets.
+      geometry.computeBoundingBox(); geometry.computeBoundingSphere();
       const material = options.bakeTexture === false ? mesh.material : bakeAtlas(mesh, face, samples, blend);
       saved.push({ mesh, geometry: source, material: mesh.material, dictionary: mesh.morphTargetDictionary, influences: mesh.morphTargetInfluences });
       mesh.geometry = geometry; mesh.material = material; mesh.updateMorphTargets();

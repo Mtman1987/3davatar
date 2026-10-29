@@ -433,6 +433,7 @@ function Studio({
           headZ={state.headZ}
           expression={state.expression}
           faceRev={state.faceRev}
+          focusFace={state.panel === "face"}
           sampleSound={() => engineRef.current?.sample() ?? null}
         />
         <div className="safe-top pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3">
@@ -646,7 +647,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
           onClick={() => state.patch({ faceChoice: "detail" })}
         />
       </div>
-      <p className="text-sm text-pretty text-muted">Both keep the 52 expressions, so Sound2Face and Audio2Face can drive them.</p>
+      <p className="text-sm text-pretty text-muted">Photo shape and texture are applied to the connected head mesh. Both modes transfer 52 generated expression controls; these are not an authored facial rig.</p>
       <div className="flex gap-2">
         {(
           [
@@ -670,7 +671,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
       </div>
       <Slider label="Head size" min={0.8} max={1.35} step={0.01} value={state.headScale} onChange={(headScale) => state.patch({ headScale })} />
       <Slider label="Height" min={-0.06} max={0.08} step={0.005} value={state.headY} onChange={(headY) => state.patch({ headY })} />
-      <Slider label="Depth" min={-0.04} max={0.1} step={0.005} value={state.headZ} onChange={(headZ) => state.patch({ headZ })} />
+      <Slider label="Depth" min={-0.04} max={0.04} step={0.005} value={Math.min(0.04, state.headZ)} onChange={(headZ) => state.patch({ headZ })} />
       <Slider label="Expression" min={0} max={1.4} step={0.01} value={state.expression} onChange={(expression) => state.patch({ expression })} />
     </div>
   );

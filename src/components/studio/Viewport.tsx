@@ -13,6 +13,7 @@ type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
+  focusFace?: boolean;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
@@ -155,6 +156,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     try {
       binding = bindConnectedFace(loaded.root, built, { headScale: props.headScale, headY: props.headY, headZ: props.headZ });
       faceBindingRef.current = binding;
+      wrapRef.current?.setAttribute("data-connected-face", JSON.stringify(binding.report));
       propsRef.current.onError?.("");
       propsRef.current.onModelInfo?.({ morphNames: binding.report.morphNames, animationNames: loaded.clips.map(c => c.name || "Unnamed animation") });
     } catch (error) {
@@ -163,9 +165,24 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     }
     return () => {
       binding.restore();
+      wrapRef.current?.removeAttribute("data-connected-face");
       if (faceBindingRef.current === binding) faceBindingRef.current = null;
     };
   }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.skin, props.modelUrl, props.bodyAsset, booted]);
+
+  useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl) return;
+    const head = loaded.root.getObjectByName("head");
+    if (props.focusFace && head) {
+      const center = head.getWorldPosition(new THREE.Vector3()); center.y += 0.035;
+      fitCameraRef.current?.(center, 0.75);
+    } else {
+      const bounds = new THREE.Box3().setFromObject(loaded.root);
+      const size = bounds.getSize(new THREE.Vector3()); const camera = cameraRef.current;
+      if (camera) fitCameraRef.current?.(bounds.getCenter(new THREE.Vector3()), Math.max(size.y, size.x / camera.aspect) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) * 1.12);
+    }
+  }, [props.focusFace, props.faceRev, props.modelUrl, props.bodyAsset, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
