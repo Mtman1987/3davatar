@@ -2,7 +2,7 @@
 """Create experimental, non-destructive face-opening GLB candidates with Blender.
 
 The source files are never overwritten. The cut is referenced to the exact head
-bone, with a separate backward offset applied only to the cut reference. The
+bone, with a separate forward offset applied only to the cut reference. The
 actual armature and head bone remain unchanged. Whole polygons are removed;
 the boundary is not remeshed or welded.
 """
@@ -39,11 +39,14 @@ def main():
     head_world = arm.matrix_world @ head.head_local
 
     # Blender imports GLB Y-up as Z-up; GLB +Z-front maps to Blender -Y.
-    # Keep the bone reference intact and offset only the cutting reference.
+    # Keep the bone reference intact and move the cut reference forward.
+    # Blender -Y is the front. Compared with the prior +0.040 candidate,
+    # -0.040 shifts the cutting plane forward by 0.080 scene units total.
+    # This deliberately leaves substantially more space before the ears.
     half_width = 0.095 if sex == "male" else 0.083
-    backward_offset = 0.040  # scene units, away from the face/front (+Y in Blender)
+    forward_offset = -0.040  # scene units; negative Y moves toward the face/front
     cut_reference = head_world.copy()
-    cut_reference.y += backward_offset
+    cut_reference.y += forward_offset
     z_min = cut_reference.z - 0.045
     z_max = cut_reference.z + (0.105 if sex == "male" else 0.095)
     y_max = cut_reference.y - 0.020
@@ -93,10 +96,11 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; separate backward-offset cut reference",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; forward-offset cut reference to preserve more clearance before ears",
         "head_bone_world_position_unchanged": [round(float(v), 7) for v in head_world],
         "cut_reference_world": [round(float(v), 7) for v in cut_reference],
-        "backward_offset_scene_units": backward_offset,
+        "forward_offset_scene_units": forward_offset,
+        "forward_shift_vs_previous_candidate_scene_units": 0.080,
         "cut_region_world": {
             "x_min": round(float(cut_reference.x - half_width), 7),
             "x_max": round(float(cut_reference.x + half_width), 7),
