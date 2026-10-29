@@ -218,58 +218,19 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
-    // The base GLB keeps its own skull/jaw underneath this photo-only surface.
-    // Match the head's vertical reach without widening the cheeks; uniform
-    // scaling left the original chin visible below the captured face like a mask.
-    faceMesh.scale.set(
-      props.headScale / rootScale,
-      (props.headScale * 0.98) / rootScale,
-      props.headScale / rootScale,
+    // Keep the photo face aligned to the same body-relative reference used
+    // before the experimental head-bone offsets. The body bounds are measured
+    // after normalization, so the existing Head Scale/Y/Z controls remain
+    // meaningful and the face does not inherit a guessed joint offset.
+    faceMesh.scale.setScalar(props.headScale / rootScale);
+    const targetY = bounds.max.y - height * 0.075 + props.headY;
+    const targetZ = bounds.max.z + 0.012 + props.headZ;
+    faceMesh.position.set(
+      (0 - loaded.root.position.x) / rootScale,
+      (targetY - loaded.root.position.y) / rootScale,
+      (targetZ - loaded.root.position.z) / rootScale,
     );
-
-    // Place the photo face from the actual head joint, not the whole body's
-    // bounding-box front edge (which can be dominated by shoulders/arms).
-    // Compute the desired point in world space first, then convert it to the
-    // model root's local space before attaching; Object3D.attach preserves the
-    // resulting world transform when the head bone becomes the parent.
-    loaded.root.updateMatrixWorld(true);
     const headBone = findHeadBone(loaded.root);
-    const headWorld = new THREE.Vector3();
-    if (headBone) headBone.getWorldPosition(headWorld);
-    else headWorld.set(
-      (bounds.min.x + bounds.max.x) * 0.5,
-      bounds.max.y - height * 0.12,
-      (bounds.min.z + bounds.max.z) * 0.5,
-    );
-    const targetWorld = headWorld.clone();
-    // The normalized base body is about 2 viewer units tall (roughly 72 inches).
-    // Start lower and slightly shorter than the previous trial: the photo
-    // face was sitting too high in the skull and its forehead/chin footprint
-    // extended too far vertically. The Head Y control remains the fine adjuster.
-    targetWorld.y += height * (0.015 - 1 / 72) + props.headY;
-    // Keep the photo surface close to the skull. The former 0.035 + 3/72
-    // offset pushed it roughly 4.3 inches forward on a normalized 6-foot avatar,
-    // which made the reconstructed face read as a floating mask.
-    targetWorld.z += height * 0.015 + props.headZ;
-    const targetLocal = loaded.root.worldToLocal(targetWorld.clone());
-    faceMesh.position.copy(targetLocal);
-
-    // Normalize photo roll from the detected eye line before attaching the
-    // photo surface to the head. Without this, a slightly tilted source photo
-    // leaves one eye beyond the mask even though the face center is aligned.
-    // MediaPipe's image Y points down; the generated mesh uses Y-up, so this
-    // sign levels the 3D eye line while keeping texture UVs and landmarks paired.
-    const leftEye = [33, 133].map((index) => built.positions.slice(index * 3, index * 3 + 3));
-    const rightEye = [263, 362].map((index) => built.positions.slice(index * 3, index * 3 + 3));
-    const eyeCenter = (points: Float32Array[]) => new THREE.Vector3(
-      points.reduce((sum, point) => sum + point[0]!, 0) / points.length,
-      points.reduce((sum, point) => sum + point[1]!, 0) / points.length,
-      points.reduce((sum, point) => sum + point[2]!, 0) / points.length,
-    );
-    const eyeA = eyeCenter(leftEye);
-    const eyeB = eyeCenter(rightEye);
-    const eyeLineAngle = Math.atan2(eyeB.y - eyeA.y, eyeB.x - eyeA.x);
-    faceMesh.rotation.z = -eyeLineAngle;
     faceMesh.renderOrder = 2;
     faceMesh.updateMorphTargets();
     faceMesh.userData.avatarPhotoFaceBaseline = [...built.influences];
