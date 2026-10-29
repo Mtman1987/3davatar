@@ -1,0 +1,82 @@
+name: Connected photo-face validation
+
+on:
+  push:
+    branches:
+      - fix/connected-photo-face
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test connected-face transfer on male and female rigs
+        run: node --test scripts/connected-face.test.mjs
+
+      - name: Run complete repository test suite
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Chromium for real browser verification
+        run: npx playwright install --with-deps chromium
+
+      - name: Start development server
+        run: |
+          npm run dev > /tmp/avatarace-dev.log 2>&1 &
+          echo $! > /tmp/avatarace-dev.pid
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/ >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/avatarace-dev.log
+          exit 1
+
+      - name: Verify male and female visuals, expressions, export and save/reopen
+        env:
+          APP_URL: http://127.0.0.1:8080
+        run: |
+          CHROME_PATH="$(node --input-type=module -e 'import { chromium } from "playwright"; console.log(chromium.executablePath())')"
+          export CHROME_PATH
+          node scripts/connected-face-browser.mjs
+
+      - name: Stop development server
+        if: always()
+        run: |
+          if [ -f /tmp/avatarace-dev.pid ]; then
+            kill "$(cat /tmp/avatarace-dev.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-face-browser-evidence
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
