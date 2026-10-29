@@ -42,9 +42,11 @@ def main():
 
     # First-pass facial footprint. +Z is the front as approved by the user.
     half_width = 0.095 if sex == "male" else 0.083
-    y_min = head_world.y - 0.045
-    y_max = head_world.y + (0.105 if sex == "male" else 0.095)
-    z_min = head_world.z + 0.020
+    # Blender imports the GLB with Y-up converted to Z-up. The head's height
+    # is therefore Blender Z, while GLB +Z-front maps to Blender -Y.
+    z_min = head_world.z - 0.045
+    z_max = head_world.z + (0.105 if sex == "male" else 0.095)
+    y_max = head_world.y - 0.020
     removed = {}
     total_before = total_after = 0
 
@@ -59,7 +61,7 @@ def main():
         for poly in mesh.polygons:
             center = obj.matrix_world @ poly.center
             if (abs(center.x - head_world.x) <= half_width and
-                y_min <= center.y <= y_max and center.z >= z_min):
+                z_min <= center.z <= z_max and center.y <= y_max):
                 remove_indices.append(poly.index)
         if remove_indices:
             # Delete through BMesh so UVs, materials, vertex groups and modifiers
@@ -94,14 +96,14 @@ def main():
         "source": source,
         "candidate": str(output_path),
         "sex": sex,
-        "cut_assumption": "+Z is front; polygon-centroid box around exact head bone",
+        "cut_assumption": "GLB Y-up/Z-front converted by Blender to Z-up/-Y-front; polygon-centroid box around exact head bone",
         "head_world_position": [round(float(v), 7) for v in head_world],
         "cut_region_world": {
             "x_min": round(float(head_world.x - half_width), 7),
             "x_max": round(float(head_world.x + half_width), 7),
-            "y_min": round(float(y_min), 7),
-            "y_max": round(float(y_max), 7),
             "z_min": round(float(z_min), 7),
+            "z_max": round(float(z_max), 7),
+            "blender_y_max_front_boundary": round(float(y_max), 7),
         },
         "removed_polygons_by_mesh": removed,
         "total_polygons_before": total_before,
