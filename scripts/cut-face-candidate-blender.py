@@ -40,11 +40,11 @@ def main():
 
     # Blender imports GLB Y-up as Z-up; GLB +Z-front maps to Blender -Y.
     # Keep the bone reference intact and move the cut reference forward.
-    # Blender -Y is the front. Compared with the prior +0.040 candidate,
-    # -0.040 shifts the cutting plane forward by 0.080 scene units total.
+    # Blender -Y is the front. Compared with the prior -0.040 candidate,
+    # -0.080 shifts the cutting plane forward by another 0.080 scene units.
     # This deliberately leaves substantially more space before the ears.
     half_width = 0.095 if sex == "male" else 0.083
-    forward_offset = -0.040  # scene units; negative Y moves toward the face/front
+    forward_offset = -0.080  # scene units; negative Y moves toward the face/front
     cut_reference = head_world.copy()
     cut_reference.y += forward_offset
     z_min = cut_reference.z - 0.045
