@@ -22,7 +22,37 @@ async function load(sex) {
 }
 for (const sex of ["male", "female"]) {
   test(`${sex}: same topology, skin, UVs, joints, object count; reversible morph transfer`, async () => {
-    const root = await load(sex); const meshes=[];const objects=[];
+    const root = await load(sex);
+    const head = root.getObjectByName("head");
+    const headWorld = head.getWorldPosition(new THREE.Vector3());
+    const oval = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+    const sourceBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (const id of oval) {
+      sourceBounds.minX = Math.min(sourceBounds.minX, face.positions[id * 3]);
+      sourceBounds.maxX = Math.max(sourceBounds.maxX, face.positions[id * 3]);
+      sourceBounds.minY = Math.min(sourceBounds.minY, face.positions[id * 3 + 1]);
+      sourceBounds.maxY = Math.max(sourceBounds.maxY, face.positions[id * 3 + 1]);
+    }
+    const targetBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity, count: 0 };
+    root.traverse(mesh => {
+      if (!mesh.isSkinnedMesh || !mesh.geometry.getAttribute("skinIndex")) return;
+      const si = mesh.geometry.getAttribute("skinIndex"), sw = mesh.geometry.getAttribute("skinWeight");
+      const headJoints = new Set();
+      mesh.skeleton.bones.forEach((bone, index) => { for (let p = bone; p; p = p.parent) if (p === head) { headJoints.add(index); break; } });
+      for (let i = 0; i < mesh.geometry.getAttribute("position").count; i++) {
+        let influence = 0;
+        for (let k = 0; k < 4; k++) if (headJoints.has(si.getComponent(i, k))) influence += sw.getComponent(i, k);
+        if (influence < 0.4) continue;
+        const p = mesh.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+        if (p.z < headWorld.z + 0.025) continue;
+        targetBounds.minX = Math.min(targetBounds.minX, p.x); targetBounds.maxX = Math.max(targetBounds.maxX, p.x);
+        targetBounds.minY = Math.min(targetBounds.minY, p.y); targetBounds.maxY = Math.max(targetBounds.maxY, p.y);
+        targetBounds.minZ = Math.min(targetBounds.minZ, p.z); targetBounds.maxZ = Math.max(targetBounds.maxZ, p.z);
+        targetBounds.count++;
+      }
+    });
+    console.log("CONNECTED_FACE_FIT_DIAGNOSTIC", JSON.stringify({ sex, head: headWorld.toArray(), sourceOval: sourceBounds, targetFrontHead: targetBounds }));
+    const meshes=[];const objects=[];
     root.traverse(o=>{objects.push(o);if(o.isMesh)meshes.push({mesh:o,geometry:o.geometry,material:o.material,position:o.geometry.getAttribute("position").array.slice()});});
     const beforeBones = objects.filter(o=>o.isBone).map(o=>o.matrixWorld.elements.slice());
     const binding = bindConnectedFace(root,face,options);
