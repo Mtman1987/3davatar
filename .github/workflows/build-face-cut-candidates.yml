@@ -1,0 +1,56 @@
+name: Build experimental face-cut candidates
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - tooling/face-cut-validator
+    paths:
+      - "scripts/cut-face-candidate-blender.py"
+      - ".github/workflows/build-face-cut-candidates.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cut-candidates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender python3-numpy
+      - name: Verify NumPy inside Blender Python
+        run: |
+          set -e
+          blender -b --python-expr "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); import numpy; print('BLENDER_NUMPY_OK', numpy.__version__, sys.version)"
+      - name: Generate male and female test candidates
+        env:
+          PYTHONPATH: /usr/lib/python3/dist-packages
+        run: |
+          set -e
+          mkdir -p artifacts
+          blender -b --python-expr "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); import numpy" --python scripts/cut-face-candidate-blender.py -- \
+            public/models/male-base-mesh-base_male.glb \
+            artifacts/male-face-cut-candidate.glb male
+          blender -b --python-expr "import sys; sys.path.insert(0, '/usr/lib/python3/dist-packages'); import numpy" --python scripts/cut-face-candidate-blender.py -- \
+            public/models/female-base-mesh-base_female.glb \
+            artifacts/female-face-cut-candidate.glb female
+      - name: Install audit dependencies
+        run: python -m pip install numpy trimesh pygltflib
+      - name: Verify candidate rigs and mesh bounds
+        run: |
+          python scripts/audit-face-cut-coordinates.py \
+            artifacts/male-face-cut-candidate.glb \
+            artifacts/female-face-cut-candidate.glb \
+            --output artifacts/candidate-coordinate-audit.json
+      - name: Upload cut candidates and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: face-cut-test-candidates
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
