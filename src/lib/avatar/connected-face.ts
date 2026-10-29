@@ -90,17 +90,48 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
   const head = heads[0]!;
   const headWorld = head.getWorldPosition(new THREE.Vector3());
   const sampleAt = faceSampler(face);
-  const scale = THREE.MathUtils.clamp(options.headScale, 0.8, 1.35) * 1.12;
-  // Derive the center from the existing head joint. Slider values are viewer units.
-  const origin = headWorld.clone(); origin.y += 0.015 + options.headY;
+  // Derive a uniform photo-to-head scale from the actual front-facing, head-
+  // weighted skin width. The former fixed 1.12 mapped only the middle ~84-88%
+  // of the photo oval across the head, enlarging and stretching the eyes.
+  // Keep X/Y identical so facial proportions are never independently warped.
   const candidates: THREE.SkinnedMesh[] = [];
   root.traverse(o => {
     const mesh = o as THREE.SkinnedMesh;
-    // Preserve existing eye/lip detail primitives too. Their head skin weights
-    // and spatial overlap decide eligibility; nothing is added or detached.
     if (mesh.isSkinnedMesh && mesh.geometry.getAttribute("skinIndex")) candidates.push(mesh);
   });
   if (!candidates.length) throw new Error("Connected face: standardized connected skin primitive 'base' is missing.");
+  const headJointsByMesh = new Map<THREE.SkinnedMesh, Set<number>>();
+  let targetMinX = Infinity, targetMaxX = -Infinity;
+  for (const mesh of candidates) {
+    const skinIndex = mesh.geometry.getAttribute("skinIndex"), skinWeight = mesh.geometry.getAttribute("skinWeight");
+    const normal = mesh.geometry.getAttribute("normal");
+    if (!skinIndex || !skinWeight || !normal) continue;
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+    const joints = new Set<number>();
+    mesh.skeleton.bones.forEach((bone, index) => {
+      for (let p: THREE.Object3D | null = bone; p; p = p.parent) if (p === head) { joints.add(index); break; }
+    });
+    headJointsByMesh.set(mesh, joints);
+    for (let i = 0; i < mesh.geometry.getAttribute("position").count; i++) {
+      let influence = 0;
+      for (let k = 0; k < 4; k++) if (joints.has(skinIndex.getComponent(i, k))) influence += skinWeight.getComponent(i, k);
+      if (influence < 0.4) continue;
+      const world = mesh.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+      if (world.z < headWorld.z + 0.025) continue;
+      const facing = new THREE.Vector3().fromBufferAttribute(normal, i).applyMatrix3(normalMatrix).normalize().z;
+      if (facing <= 0.25) continue;
+      targetMinX = Math.min(targetMinX, world.x); targetMaxX = Math.max(targetMaxX, world.x);
+    }
+  }
+  const ovalX = OVAL.filter(i => i * 3 < face.positions.length).map(i => face.positions[i * 3]!);
+  const sourceWidth = Math.max(...ovalX) - Math.min(...ovalX);
+  const targetWidth = targetMaxX - targetMinX;
+  if (!(sourceWidth > 0 && targetWidth > 0 && Number.isFinite(targetWidth))) {
+    throw new Error("Connected face: unable to measure the existing front-facing head width.");
+  }
+  const scale = THREE.MathUtils.clamp(options.headScale, 0.8, 1.35) * targetWidth / sourceWidth;
+  // Derive the center from the existing head joint. Slider values are viewer units.
+  const origin = headWorld.clone(); origin.y += 0.015 + options.headY;
   const saved: Array<{ mesh: THREE.SkinnedMesh; geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[]; dictionary?: Record<string, number>; influences?: number[] }> = [];
   const report: ConnectedFaceReport = { method: "photo transferred onto original connected skin", meshes: 0, changedVertices: 0, vertexCount: 0, triangleCount: 0, morphNames: [] };
   const restore = () => {
@@ -128,11 +159,7 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
       // A front projection must not paint the temples or back-facing side wall.
       // Z-depth alone admitted those vertices and stretched the photo sideways.
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
-      const headJoints = new Set<number>();
-      mesh.skeleton.bones.forEach((bone, index) => {
-        let p: THREE.Object3D | null = bone;
-        while (p) { if (p === head) { headJoints.add(index); break; } p = p.parent; }
-      });
+      const headJoints = headJointsByMesh.get(mesh) ?? new Set<number>();
       const samples: Array<Sample | null> = Array(count).fill(null);
       const blend = new Float32Array(count);
       const worldPositions: Array<THREE.Vector3 | null> = Array(count).fill(null);
