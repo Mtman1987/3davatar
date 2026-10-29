@@ -51,35 +51,45 @@ export function buildFace(
   return { positions, uvs, indices, morphs, influences, texture };
 }
 
+// AvatarAce body assets are normalized to a 2-unit (2-metre) height.
+// MediaPipe's canonical face model uses centimetres, so a 19 cm face-oval
+// width is represented as 0.19 body units. Every photo uses this same ruler.
+const STANDARD_FACE_WIDTH = 0.19;
+
 function layout(landmarks: Landmark[], mode: Mode) {
   const n = landmarks.length;
-  let cx = 0;
-  let cy = 0;
-  let cz = 0;
-  for (const lm of landmarks) {
-    cx += lm.x;
-    cy += lm.y;
-    cz += lm.z;
+  const oval = OVAL.filter((index) => index < n).map((index) => landmarks[index]!);
+  if (oval.length < 3) throw new Error("Face landmarks are missing the canonical face oval.");
+
+  // Anchor the coordinate frame to the semantic face outline, not all 478
+  // points (which include iris points and other detail landmarks).
+  const center = oval.reduce(
+    (sum, lm) => ({ x: sum.x + lm.x, y: sum.y + lm.y, z: sum.z + lm.z }),
+    { x: 0, y: 0, z: 0 },
+  );
+  center.x /= oval.length;
+  center.y /= oval.length;
+  center.z /= oval.length;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const lm of oval) {
+    minX = Math.min(minX, lm.x);
+    maxX = Math.max(maxX, lm.x);
   }
-  cx /= n;
-  cy /= n;
-  cz /= n;
+  const sourceWidth = maxX - minX;
+  if (!(sourceWidth > 0 && Number.isFinite(sourceWidth))) {
+    throw new Error("Face landmarks have an invalid canonical oval width.");
+  }
+  const scale = STANDARD_FACE_WIDTH / sourceWidth;
   const zBoost = mode === "detail" ? 1.45 : 1.05;
   const raw = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
     const lm = landmarks[i]!;
-    raw[i * 3] = lm.x - cx;
-    raw[i * 3 + 1] = -(lm.y - cy);
-    raw[i * 3 + 2] = -(lm.z - cz) * zBoost;
+    raw[i * 3] = (lm.x - center.x) * scale;
+    raw[i * 3 + 1] = -(lm.y - center.y) * scale;
+    raw[i * 3 + 2] = -(lm.z - center.z) * scale * zBoost;
   }
-  let minX = Infinity;
-  let maxX = -Infinity;
-  for (let i = 0; i < n; i++) {
-    minX = Math.min(minX, raw[i * 3]!);
-    maxX = Math.max(maxX, raw[i * 3]!);
-  }
-  const scale = 0.19 / Math.max(0.0001, maxX - minX);
-  for (let i = 0; i < raw.length; i++) raw[i] = (raw[i] ?? 0) * scale;
   return raw;
 }
 
