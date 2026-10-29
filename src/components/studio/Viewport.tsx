@@ -218,13 +218,12 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
-    // Keep the photo face aligned to the same body-relative reference used
-    // before the experimental head-bone offsets. The body bounds are measured
-    // after normalization, so the existing Head Scale/Y/Z controls remain
-    // meaningful and the face does not inherit a guessed joint offset.
+    // Preserve the established face depth baseline: Z = 0.
+    // Do not derive face depth from the full-body bounding box; that pushes
+    // the photo face in front of the head. Keep the user's Z control additive.
     faceMesh.scale.setScalar(props.headScale / rootScale);
     const targetY = bounds.max.y - height * 0.075 + props.headY;
-    const targetZ = bounds.max.z + 0.012 + props.headZ;
+    const targetZ = props.headZ;
     faceMesh.position.set(
       (0 - loaded.root.position.x) / rootScale,
       (targetY - loaded.root.position.y) / rootScale,
