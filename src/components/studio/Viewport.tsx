@@ -245,14 +245,9 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     // model root's local space before attaching; Object3D.attach preserves the
     // resulting world transform when the head bone becomes the parent.
     loaded.root.updateMatrixWorld(true);
-    const headBone = findHeadBone(loaded.root);
+    const headBone = requireHeadBone(loaded.root);
     const headWorld = new THREE.Vector3();
-    if (headBone) headBone.getWorldPosition(headWorld);
-    else headWorld.set(
-      (bounds.min.x + bounds.max.x) * 0.5,
-      bounds.max.y - height * 0.12,
-      (bounds.min.z + bounds.max.z) * 0.5,
-    );
+    headBone.getWorldPosition(headWorld);
     const targetWorld = headWorld.clone();
     // The normalized base body is about 2 viewer units tall (roughly 72 inches).
     // Start lower and slightly shorter than the previous trial: the photo
@@ -290,7 +285,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     });
     loaded.root.add(faceMesh);
     loaded.root.updateMatrixWorld(true);
-    if (headBone) headBone.attach(faceMesh);
+    headBone.attach(faceMesh);
     // Apply a saved exact fit only to the same generic body and face variant.
     // A missing/legacy snapshot leaves the computed default placement untouched.
     const savedFit = props.faceFitSnapshot;
@@ -396,7 +391,7 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
 function trimUnderlyingNose(
   root: THREE.Object3D,
   photoFace: THREE.Mesh,
-  headBone: THREE.Bone | null,
+  headBone: THREE.Bone,
   bodyHeight: number,
 ): () => void {
   const restorations: Array<{ mesh: THREE.Mesh; geometry: THREE.BufferGeometry }> = [];
@@ -421,8 +416,7 @@ function trimUnderlyingNose(
   if (faceWidth <= 0 || faceHeight <= 0) return () => {};
 
   const headCenter = new THREE.Vector3();
-  if (headBone) headBone.getWorldPosition(headCenter);
-  else headCenter.copy(faceBounds.getCenter(new THREE.Vector3()));
+  headBone.getWorldPosition(headCenter);
   root.worldToLocal(headCenter);
 
   // Add a small margin beyond the face mesh's bounds to prevent edge pokethrough.
@@ -480,17 +474,23 @@ function trimUnderlyingNose(
   };
 }
 
-function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
-  let exact: THREE.Bone | null = null;
-  let neck: THREE.Bone | null = null;
+/**
+ * The standardized male and female base rigs share this exact bone contract.
+ * Do not infer a head from names, bounds, or the neck chain: a broken rig must
+ * fail validation instead of silently moving the photo face to a different pivot.
+ */
+function requireHeadBone(root: THREE.Object3D): THREE.Bone {
+  const matches: THREE.Bone[] = [];
   root.traverse((object) => {
-    const bone = object as THREE.Bone;
-    if (!bone.isBone) return;
-    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
-    if (/^(head|headjoint|mixamorighead|skull)$/.test(name)) exact = bone;
-    else if (!neck && /neck/.test(name)) neck = bone;
+    const candidate = object as THREE.Bone;
+    if (candidate.isBone && candidate.name === "head") matches.push(candidate);
   });
-  return exact ?? neck;
+  if (matches.length !== 1) {
+    throw new Error(
+      `Avatar rig contract violation: expected exactly one bone named "head"; found ${matches.length}.`,
+    );
+  }
+  return matches[0]!;
 }
 
 function sampleSkinTone(source: HTMLCanvasElement): THREE.Color | null {
