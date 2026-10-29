@@ -1,4 +1,4 @@
-name: Install approved face-cut bodies
+name: Install approved in-place-deformed face bodies
 
 on:
   workflow_dispatch:
@@ -22,12 +22,12 @@ jobs:
           ref: experiment/mediapipe-face-pipeline
           fetch-depth: 0
 
-      - name: Download approved run 17 artifact
+      - name: Download run 20 in-place deformation artifact
         uses: actions/download-artifact@v4
         with:
           name: face-cut-test-candidates
           repository: ${{ github.repository }}
-          run-id: 40936781335
+          run-id: 40946318881
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: approved-artifact
 
@@ -37,6 +37,10 @@ jobs:
           set -euo pipefail
           test -s approved-artifact/male-face-cut-candidate.glb
           test -s approved-artifact/female-face-cut-candidate.glb
+          grep -q '"method": "deform existing vertices only; no cuts; no new geometry"' approved-artifact/male-face-cut-candidate.report.json
+          grep -q '"method": "deform existing vertices only; no cuts; no new geometry"' approved-artifact/female-face-cut-candidate.report.json
+          grep -q '"topology_changed": false' approved-artifact/male-face-cut-candidate.report.json
+          grep -q '"topology_changed": false' approved-artifact/female-face-cut-candidate.report.json
           mkdir -p public/models
           cp approved-artifact/male-face-cut-candidate.glb public/models/male-base-mesh-base_male.glb
           cp approved-artifact/female-face-cut-candidate.glb public/models/female-base-mesh-base_female.glb
@@ -45,7 +49,7 @@ jobs:
           test "$(head -c 4 public/models/male-base-mesh-base_male.glb)" = "glTF"
           test "$(head -c 4 public/models/female-base-mesh-base_female.glb)" = "glTF"
 
-      - name: Commit approved body replacements
+      - name: Commit in-place-deformed body replacements
         shell: bash
         run: |
           set -euo pipefail
@@ -53,8 +57,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/models/male-base-mesh-base_male.glb public/models/female-base-mesh-base_female.glb
           if git diff --cached --quiet; then
-            echo "Approved body files already installed; no commit needed."
+            echo "Correct in-place-deformed body files already installed; no commit needed."
             exit 0
           fi
-          git commit -m "Install approved run17 male and female body models"
+          git commit -m "Install in-place-deformed male and female body models"
           git push origin HEAD:experiment/mediapipe-face-pipeline
