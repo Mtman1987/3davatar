@@ -23,8 +23,8 @@ async function load(sex) {
 for (const sex of ["male", "female"]) {
   test(`${sex}: same topology, skin, UVs, joints, object count; reversible morph transfer`, async () => {
     const root = await load(sex);
-    const head = root.getObjectByName("head");
-    const headWorld = head.getWorldPosition(new THREE.Vector3());
+    const headBone = root.getObjectByName("head");
+    const headWorld = headBone.getWorldPosition(new THREE.Vector3());
     const oval = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
     const sourceBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
     for (const id of oval) {
@@ -38,7 +38,7 @@ for (const sex of ["male", "female"]) {
       if (!mesh.isSkinnedMesh || !mesh.geometry.getAttribute("skinIndex")) return;
       const si = mesh.geometry.getAttribute("skinIndex"), sw = mesh.geometry.getAttribute("skinWeight");
       const headJoints = new Set();
-      mesh.skeleton.bones.forEach((bone, index) => { for (let p = bone; p; p = p.parent) if (p === head) { headJoints.add(index); break; } });
+      mesh.skeleton.bones.forEach((bone, index) => { for (let p = bone; p; p = p.parent) if (p === headBone) { headJoints.add(index); break; } });
       for (let i = 0; i < mesh.geometry.getAttribute("position").count; i++) {
         let influence = 0;
         for (let k = 0; k < 4; k++) if (headJoints.has(si.getComponent(i, k))) influence += sw.getComponent(i, k);
