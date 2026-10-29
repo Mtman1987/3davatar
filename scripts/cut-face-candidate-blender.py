@@ -86,61 +86,6 @@ def main():
     if not removed:
         raise SystemExit("No polygons fell inside the cut region; refusing to export an unchanged candidate")
 
-    # Add two smooth, skin-material side seam covers. Keep the opening unchanged.
-    skin_material = None
-    for obj in bpy.context.scene.objects:
-        if obj.type == "MESH" and "head" in obj.vertex_groups:
-            for slot in obj.material_slots:
-                if slot.material:
-                    skin_material = slot.material
-                    break
-        if skin_material:
-            break
-    if skin_material is None:
-        for obj in bpy.context.scene.objects:
-            if obj.type == "MESH":
-                for slot in obj.material_slots:
-                    if slot.material:
-                        skin_material = slot.material
-                        break
-            if skin_material:
-                break
-    if skin_material is None:
-        raise SystemExit("Could not find a skin material for rounded side covers")
-
-    cover_z = (z_min + z_max) / 2.0
-    cover_offset_x = half_width * 0.88
-    cover_y = head_world.y - 0.035
-    cover_specs = [
-        ("FaceSideCover_L", head_world.x - cover_offset_x),
-        ("FaceSideCover_R", head_world.x + cover_offset_x),
-    ]
-    cover_report = []
-    for cover_name, cover_x in cover_specs:
-        bpy.ops.mesh.primitive_uv_sphere_add(
-            segments=24, ring_count=16,
-            location=(cover_x, cover_y, cover_z)
-        )
-        cover = bpy.context.object
-        cover.name = cover_name
-        cover.scale = (0.012 if sex == "male" else 0.0105, 0.014, 0.060 if sex == "male" else 0.054)
-        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-        for poly in cover.data.polygons:
-            poly.use_smooth = True
-        cover.data.materials.clear()
-        cover.data.materials.append(skin_material)
-        world_matrix = cover.matrix_world.copy()
-        cover.parent = arm
-        cover.parent_type = "BONE"
-        cover.parent_bone = "head"
-        cover.matrix_world = world_matrix
-        cover_report.append({
-            "name": cover_name,
-            "world_position": [round(float(cover_x), 7), round(float(cover_y), 7), round(float(cover_z), 7)],
-            "shape": "smooth rounded ellipsoid",
-            "material": skin_material.name,
-            "parent_bone": "head"
-        })
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -172,8 +117,7 @@ def main():
         "removed_polygons_by_mesh": removed,
         "total_polygons_before": total_before,
         "total_polygons_after": total_after,
-        "side_covers": cover_report,
-        "warning": "Experimental elliptical cut plus rounded side covers; inspect visually before use.",
+        "warning": "Experimental ellipse-only candidate; no added cover geometry. Inspect visually before use.",
     }
     report_path = output_path.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
