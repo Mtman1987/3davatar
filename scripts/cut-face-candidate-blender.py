@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Build face-cut candidates with a coordinate-defined flat backing patch.
+"""Create no-cut face-recess candidates by deforming the existing mesh only.
 
-The approved cut footprint is preserved exactly. The patch is a flat XZ quad
-at the cut's front boundary, slightly toward the viewer so it closes the
-opening in the inspection GLB. It is weighted to the existing head bone.
+No faces are deleted and no new objects/vertices are added. Approved cut
+coordinates define the target recess bounds. Only existing front-facing
+vertices inside that region are moved; all other vertex coordinates remain
+unchanged.
 """
 import bpy
-import bmesh
 import json
 import sys
 from pathlib import Path
@@ -15,6 +15,10 @@ from mathutils import Vector
 def args_after_dash():
     args = sys.argv
     return args[args.index("--") + 1:] if "--" in args else []
+
+def smoothstep(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3.0 - 2.0 * t)
 
 def main():
     args = args_after_dash()
@@ -34,7 +38,7 @@ def main():
     arm, head = head_hits[0]
     head_world = arm.matrix_world @ head.head_local
 
-    # Keep the visually approved cut measurements unchanged.
+    # Approved cut reference dimensions: do not alter these values.
     half_width = 0.095 if sex == "male" else 0.083
     forward_offset = -0.060
     downward_offset = -0.010
@@ -43,101 +47,75 @@ def main():
     cut_reference.z += downward_offset
     z_min = cut_reference.z - 0.045
     z_max = cut_reference.z + (0.105 if sex == "male" else 0.095)
-    y_max = cut_reference.y - 0.020
-    removed = {}
-    total_before = total_after = 0
-    skin_material = None
+    y_boundary = cut_reference.y - 0.020
 
-    for obj in list(bpy.context.scene.objects):
-        if obj.type != "MESH":
-            continue
-        if skin_material is None:
-            for mat in obj.data.materials:
-                if mat and any(k in mat.name.lower() for k in ("skin", "body", "face")):
-                    skin_material = mat
-                    break
-            if skin_material is None and len(obj.data.materials):
-                skin_material = obj.data.materials[0]
-        mesh = obj.data
-        before = len(mesh.polygons)
-        total_before += before
-        remove_indices = []
-        for poly in mesh.polygons:
-            center = obj.matrix_world @ poly.center
-            if (abs(center.x - cut_reference.x) <= half_width and
-                z_min <= center.z <= z_max and center.y <= y_max):
-                remove_indices.append(poly.index)
-        if remove_indices:
-            bpy.ops.object.select_all(action="DESELECT")
-            obj.select_set(True)
-            bpy.context.view_layer.objects.active = obj
-            bpy.ops.object.mode_set(mode="EDIT")
-            bm = bmesh.from_edit_mesh(mesh)
-            bm.faces.ensure_lookup_table()
-            doomed = [bm.faces[i] for i in remove_indices if i < len(bm.faces)]
-            bmesh.ops.delete(bm, geom=doomed, context="FACES_ONLY")
-            bmesh.update_edit_mesh(mesh, loop_triangles=True, destructive=True)
-            bpy.ops.object.mode_set(mode="OBJECT")
-            removed[obj.name] = len(remove_indices)
-        total_after += len(mesh.polygons)
-
-    if not removed:
-        raise SystemExit("No polygons fell inside the cut region; refusing to export unchanged candidate")
-
-    # A genuinely flat surface: all four corners share one Y coordinate.
-    # Slightly forward of the boundary so the patch visibly closes the cut.
+    # The original cut removed front-side faces up to y_boundary. Instead,
+    # pull existing front-facing vertices in this footprint onto that same
+    # plane, leaving the mesh connected and adding/deleting no topology.
+    # A narrow Z-only falloff protects the forehead/jaw outside the cavity;
+    # there is intentionally no left/right cheek-wall falloff.
+    transition = 0.008
     x_min, x_max = cut_reference.x - half_width, cut_reference.x + half_width
-    y_plane = y_max - 0.001
-    verts = [(x_min, y_plane, z_min), (x_max, y_plane, z_min),
-             (x_max, y_plane, z_max), (x_min, y_plane, z_max)]
-    patch_mesh = bpy.data.meshes.new(f"{sex}_face_flat_backing_mesh")
-    patch_mesh.from_pydata(verts, [], [(0, 1, 2, 3)])
-    patch_mesh.update()
-    patch = bpy.data.objects.new(f"{sex}_face_flat_backing", patch_mesh)
-    bpy.context.collection.objects.link(patch)
-    patch["purpose"] = "Flat face-mounting/backing surface aligned to approved cut coordinates"
-    patch["flat_plane_axis"] = "Blender Y"
-    patch["plane_y"] = float(y_plane)
-    patch["cut_x_min"] = float(x_min)
-    patch["cut_x_max"] = float(x_max)
-    patch["cut_z_min"] = float(z_min)
-    patch["cut_z_max"] = float(z_max)
-    if skin_material:
-        patch.data.materials.append(skin_material)
-    group = patch.vertex_groups.new(name="head")
-    group.add(list(range(len(patch.data.vertices))), 1.0, "REPLACE")
-    modifier = patch.modifiers.new("Head bone deformation", "ARMATURE")
-    modifier.object = arm
-    # Keep the patch's coordinates in the same scene/world space as the cut.
-    patch.matrix_world = arm.matrix_world.copy() if False else patch.matrix_world
+    changed_by_mesh = {}
+    total_vertices = 0
+    changed_vertices = 0
+    max_displacement = 0.0
+
+    for obj in [o for o in bpy.context.scene.objects if o.type == "MESH"]:
+        mesh = obj.data
+        before_count = len(mesh.vertices)
+        total_vertices += before_count
+        changed = 0
+        for vert in mesh.vertices:
+            world = obj.matrix_world @ vert.co
+            if world.x < x_min or world.x > x_max or world.z < z_min or world.z > z_max:
+                continue
+            if world.y > y_boundary:
+                continue
+            # Blend into the small forehead ceiling and jaw floor; full depth
+            # in the middle, with no side walls at the left/right edges.
+            top_weight = smoothstep((z_max - world.z) / transition)
+            bottom_weight = smoothstep((world.z - z_min) / transition)
+            weight = min(top_weight, bottom_weight)
+            if weight <= 0.0:
+                continue
+            target_y = y_boundary
+            new_world_y = world.y + (target_y - world.y) * weight
+            displacement = new_world_y - world.y
+            if abs(displacement) < 1e-8:
+                continue
+            new_world = Vector((world.x, new_world_y, world.z))
+            vert.co = obj.matrix_world.inverted() @ new_world
+            changed += 1
+            changed_vertices += 1
+            max_displacement = max(max_displacement, abs(displacement))
+        if changed:
+            mesh.update()
+            changed_by_mesh[obj.name] = {"vertices_deformed": changed, "vertices_before": before_count, "vertices_after": len(mesh.vertices)}
+    if changed_vertices == 0:
+        raise SystemExit("No vertices matched the approved deformation region; refusing to export unchanged candidate")
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    bpy.ops.export_scene.gltf(
-        filepath=str(output_path), export_format="GLB", use_selection=False,
-        export_animations=True, export_skins=True, export_morph=True,
-    )
+    bpy.ops.export_scene.gltf(filepath=str(output_path), export_format="GLB",
+                              use_selection=False, export_animations=True,
+                              export_skins=True, export_morph=True)
     report = {
         "source": source, "candidate": str(output_path), "sex": sex,
-        "method": "original polygon cut plus a flat XZ backing quad",
+        "method": "deform existing vertices only; no cuts; no new geometry",
+        "topology_changed": False,
+        "total_vertices_before": total_vertices,
+        "total_vertices_after": sum(len(o.data.vertices) for o in bpy.context.scene.objects if o.type == "MESH"),
+        "changed_vertices": changed_vertices,
+        "max_absolute_y_displacement": round(float(max_displacement), 7),
         "head_bone_world_position_unchanged": [round(float(v), 7) for v in head_world],
-        "cut_reference_world": [round(float(v), 7) for v in cut_reference],
-        "cut_region_world": {
+        "approved_region_world": {
             "x_min": round(float(x_min), 7), "x_max": round(float(x_max), 7),
             "z_min": round(float(z_min), 7), "z_max": round(float(z_max), 7),
-            "blender_y_max_front_boundary": round(float(y_max), 7),
+            "y_target": round(float(y_boundary), 7),
         },
-        "flat_backing_surface": {
-            "object": patch.name, "plane_axis": "Blender Y",
-            "y": round(float(y_plane), 7),
-            "vertices_world": [[round(float(c), 7) for c in v] for v in verts],
-            "all_vertices_share_same_y": len({round(v[1], 9) for v in verts}) == 1,
-            "material": skin_material.name if skin_material else None,
-            "weighted_to_head_bone": True,
-        },
-        "removed_polygons_by_mesh": removed,
-        "total_polygons_before": total_before, "total_polygons_after": total_after,
-        "warning": "Inspection candidate; verify patch visibility/material and fit in viewer before production use.",
+        "changed_by_mesh": changed_by_mesh,
+        "warning": "Visual inspection candidate. No polygons or objects were added or removed."
     }
     output_path.with_suffix(".report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
