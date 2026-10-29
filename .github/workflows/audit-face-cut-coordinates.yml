@@ -1,0 +1,33 @@
+name: Audit face-cut coordinates
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coordinate-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install audit dependencies
+        run: python -m pip install numpy trimesh pygltflib
+      - name: Audit male and female GLBs
+        run: |
+          python scripts/audit-face-cut-coordinates.py \
+            public/models/male-base-mesh-base_male.glb \
+            public/models/female-base-mesh-base_female.glb \
+            --output artifacts/face-cut-coordinate-audit.json
+      - name: Upload coordinate audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: face-cut-coordinate-audit
+          path: artifacts/face-cut-coordinate-audit.json
+          if-no-files-found: warn
+          retention-days: 14
