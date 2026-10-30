@@ -276,7 +276,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
   useEffect(() => {
     const loaded = modelRef.current;
-    if (!loaded || props.modelUrl || props.bodyAsset === "female") return;
+    if (!loaded || props.modelUrl || props.bodyAsset === "female" || props.generatedHeadUrl) return;
     if (faceMeshRef.current) {
       faceMeshRef.current.parent?.remove(faceMeshRef.current);
       disposeFaceMesh(faceMeshRef.current);
@@ -346,7 +346,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       disposeFaceMesh(faceMesh);
       if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
     };
-  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, booted]);
+  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, props.generatedHeadUrl, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
