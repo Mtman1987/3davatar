@@ -43,7 +43,10 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
     new THREE.MeshStandardMaterial({ color: 0x59402d, roughness: 0.34 }),
   );
   iris.name = "AvatarAceIris_" + side;
-  iris.position.set(irisCenter.x, irisCenter.y, irisCenter.z + frontSign * radius * 0.025);
+  // Place iris on the visible front surface of the globe. Using the iris
+  // landmark's raw Z put it inside the eyeball on this export convention,
+  // which made the eye appear completely white.
+  iris.position.set(eyeball.position.x + (irisCenter.x - center.x), eyeball.position.y + (irisCenter.y - center.y), eyeball.position.z + frontSign * (eyeball.scale.z + irisRadius * 0.025));
   iris.scale.set(irisRadius, irisRadius, irisRadius * 0.16);
   eye.add(iris);
 
@@ -52,7 +55,7 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
     new THREE.MeshStandardMaterial({ color: 0x100d0b, roughness: 0.16 }),
   );
   pupil.name = "AvatarAcePupil_" + side;
-  pupil.position.set(irisCenter.x, irisCenter.y, iris.position.z + frontSign * irisRadius * 0.12);
+  pupil.position.set(iris.position.x, iris.position.y, iris.position.z + frontSign * irisRadius * 0.12);
   pupil.scale.set(irisRadius * 0.39, irisRadius * 0.39, irisRadius * 0.10);
   eye.add(pupil);
 
@@ -62,7 +65,7 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   );
   cornea.name = "AvatarAceCornea_" + side;
   cornea.position.copy(iris.position);
-  cornea.position.z += frontSign * irisRadius * 0.12;
+  cornea.position.z += frontSign * irisRadius * 0.20;
   cornea.scale.set(irisRadius * 1.12, irisRadius * 1.12, irisRadius * 0.20);
   eye.add(cornea);
 
@@ -213,7 +216,7 @@ export function buildGeneratedFacialAnatomy(
   return root;
 }
 
-export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28, jawBone?: THREE.Bone | null) {
+export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28, jawBone?: THREE.Bone | null, eyeDepthOffset = 0) {
   const data = root.userData.avatarAceAnatomy as { eyes: THREE.Group[]; mouth: THREE.Group } | undefined;
   if (!data) return;
   const clock = Number(root.userData.autoBlinkClock ?? 1.25) + Math.max(0, delta);
@@ -221,7 +224,11 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   const cycle = (clock * THREE.MathUtils.clamp(blinkSpeed, 0.08, 0.8)) % 1;
   const blinkWindow = 0.11;
   const autoBlink = cycle < blinkWindow ? Math.sin((cycle / blinkWindow) * Math.PI) : 0;
+  const frontSign = Number(root.userData.avatarAceAnatomy && (root.userData.avatarAceAnatomy as { frontSign?: number }).frontSign) || 1;
   for (const [index, eye] of data.eyes.entries()) {
+    // One shared calibration offset keeps both eyes seated consistently.
+    // Negative values recess them into the head; positive values move them out.
+    eye.position.z = frontSign * THREE.MathUtils.clamp(eyeDepthOffset, -0.04, 0.04);
     const upperLid = eye.userData.upperBlinkLid as THREE.Mesh | undefined;
     const lowerLid = eye.userData.lowerBlinkLid as THREE.Mesh | undefined;
     if (!upperLid || !lowerLid) continue;
