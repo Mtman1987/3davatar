@@ -57,15 +57,27 @@ export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THR
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
+
+    // The sampled complexion belongs on the generated head surface, not on
+    // separately modelled eyes, teeth, tongue, mouth cavity, or other anatomy.
+    // Tint only the native head mesh and the fitted skin patches (eyelids and
+    // mouth corners); preserve every other anatomy material's authored color.
+    const isHeadSurface = mesh.name === "AvatarAceGeneratedHeadMesh";
+    const isFittedSkinPatch =
+      mesh.name.startsWith("AvatarAceUpperBlinkLid_") ||
+      mesh.name.startsWith("AvatarAceLowerBlinkLid_") ||
+      mesh.name.startsWith("AvatarAceMouthCorner");
+    if (!isHeadSurface && !isFittedSkinPatch) return;
+
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const source of materials) {
       if (!(source instanceof THREE.MeshStandardMaterial)) continue;
-      if (source.map) {
+      if (isHeadSurface && source.map) {
         source.color.set(0xffffff);
       } else if (targetTone) {
         source.color.copy(targetTone);
       }
-      applyAvatarSkinSurface(source);
+      if (isHeadSurface || isFittedSkinPatch) applyAvatarSkinSurface(source);
     }
   });
 }
