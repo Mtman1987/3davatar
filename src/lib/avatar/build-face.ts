@@ -1,4 +1,5 @@
 import Delaunator from "delaunator";
+import { MEDIAPIPE_FACE_TRIANGLES } from "@/lib/avatar/mediapipe-topology";
 import { ARKIT_BLENDSHAPE_NAMES, ARKIT_INDEX, type ArkitName } from "@/lib/avatar/arkit";
 import type { BuiltFace } from "@/lib/avatar/face-cache";
 
@@ -35,7 +36,10 @@ export function buildFace(
   mode: Mode,
 ): BuiltFace {
   const indices = triangulate(landmarks);
-  let positions: Float32Array = layout(landmarks, mode);
+  // MediaPipe landmarks are normalized independently by image width and height.
+  // Convert them back to a common pixel aspect before building 3D coordinates;
+  // otherwise portrait photos compress the face vertically.
+  let positions: Float32Array = layout(landmarks, mode, source.height / Math.max(1, source.width));
   if (mode === "detail") {
     positions = smoothPositions(positions, indices, 2);
     inflateCheeks(positions);
@@ -51,7 +55,7 @@ export function buildFace(
   return { positions, uvs, indices, morphs, influences, texture };
 }
 
-function layout(landmarks: Landmark[], mode: Mode) {
+function layout(landmarks: Landmark[], mode: Mode, verticalAspect = 1) {
   const n = landmarks.length;
   let cx = 0;
   let cy = 0;
@@ -69,7 +73,7 @@ function layout(landmarks: Landmark[], mode: Mode) {
   for (let i = 0; i < n; i++) {
     const lm = landmarks[i]!;
     raw[i * 3] = lm.x - cx;
-    raw[i * 3 + 1] = -(lm.y - cy);
+    raw[i * 3 + 1] = -(lm.y - cy) * verticalAspect;
     raw[i * 3 + 2] = -(lm.z - cz) * zBoost;
   }
   let minX = Infinity;
@@ -84,6 +88,15 @@ function layout(landmarks: Landmark[], mode: Mode) {
 }
 
 function triangulate(landmarks: Landmark[]) {
+  // Face Landmarker uses the canonical 468-vertex topology. Reuse its
+  // authored triangles rather than re-triangulating the face in 2D, which
+  // can create triangles across the eyes, lips, nostrils, and facial boundary.
+  // The additional 10 iris landmarks are intentionally excluded from the
+  // surface topology; they remain available in the landmark/morph data.
+  if (landmarks.length >= 468) {
+    return Uint32Array.from(MEDIAPIPE_FACE_TRIANGLES);
+  }
+  // Defensive fallback for reduced landmark sets in isolated tooling/tests.
   const coords = new Float32Array(landmarks.length * 2);
   for (let i = 0; i < landmarks.length; i++) {
     coords[i * 2] = landmarks[i]!.x;
