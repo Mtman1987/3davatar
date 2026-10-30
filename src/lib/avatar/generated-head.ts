@@ -53,8 +53,6 @@ export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THR
       if (map?.image) {
         try {
           const image = map.image as CanvasImageSource & { width?: number; height?: number };
-          const width = Math.max(1, image.width ?? 1);
-          const height = Math.max(1, image.height ?? 1);
           const canvas = document.createElement("canvas");
           canvas.width = 32;
           canvas.height = 32;
