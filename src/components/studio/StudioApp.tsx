@@ -390,6 +390,7 @@ function Studio({
       bodyAsset: snap.bodyAsset,
       modelUrl: snap.modelUrl,
       modelName: snap.modelName,
+      generatedHeadUrl: snap.generatedHeadUrl,
       outfit: snap.outfit,
       hair: snap.hair,
       skin: snap.skin,
@@ -411,6 +412,7 @@ function Studio({
           bodyAsset={state.bodyAsset}
           modelUrl={state.modelUrl}
           modelName={state.modelName}
+          generatedHeadUrl={state.generatedHeadUrl}
           sampleTracking={() => null}
           animationIndex={animationIndex}
           animationPlaying={animationPlaying}
@@ -830,6 +832,7 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
     bodyAsset: item.bodyAsset ?? (item.body === "female" ? "female" : "male"),
     modelUrl: hasFinishedModel ? item.modelUrl! : null,
     modelName: hasFinishedModel ? (item.modelName ?? "Saved finished commission") : null,
+    generatedHeadUrl: item.generatedHeadUrl ?? null,
     status: hasFinishedModel ? "working" : "idle",
     statusText: hasFinishedModel ? "Loading saved finished model…" : "",
     outfit: item.outfit,
