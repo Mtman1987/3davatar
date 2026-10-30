@@ -95,7 +95,15 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loader.load(url,(gltf)=>{
       if(cancelled){disposeModel(gltf.scene);return;}
       const root=new THREE.Group();root.name=props.modelName || (props.modelUrl ? "FinishedCommission" : props.bodyAsset+"-base");root.add(gltf.scene);
-      if (!props.modelUrl && props.bodyAsset === "female") removeOriginalFemaleHead(root);
+      if (!props.modelUrl && props.bodyAsset === "female") {
+        const removal = removeOriginalFemaleHead(root);
+        if (removal.eligibleMeshes === 0 || removal.removedTriangles === 0) {
+          propsRef.current.onError?.(
+            "Female head removal found no head/jaw-weighted triangles (eligible skinned meshes: " +
+            removal.eligibleMeshes + "). The original head may be in a separate unskinned mesh.",
+          );
+        }
+      }
       root.updateMatrixWorld(true);
       const bounds=new THREE.Box3().setFromObject(root);
       if(bounds.isEmpty() || !Number.isFinite(bounds.min.y) || !Number.isFinite(bounds.max.y)){
@@ -388,8 +396,14 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
     const position = geometry.getAttribute("position");
     if (!skinIndex || !skinWeight || !position) return;
 
-    const headIndex = mesh.skeleton.bones.findIndex((bone) => normalizeBoneName(bone.name) === "head");
-    const jawIndex = mesh.skeleton.bones.findIndex((bone) => /^(jaw|jawjoint)$/.test(normalizeBoneName(bone.name)));
+    const headIndex = mesh.skeleton.bones.findIndex((bone) => {
+      const name = normalizeBoneName(bone.name);
+      return name === "head" || name.endsWith("head") || name === "skull";
+    });
+    const jawIndex = mesh.skeleton.bones.findIndex((bone) => {
+      const name = normalizeBoneName(bone.name);
+      return name === "jaw" || name.endsWith("jaw");
+    });
     if (headIndex < 0 && jawIndex < 0) return;
     eligibleMeshes++;
 
@@ -431,7 +445,9 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
     }
   });
 
-  root.userData.avatarAceFemaleHeadRemoval = { eligibleMeshes, removedTriangles: totalRemoved };
+  const result = { eligibleMeshes, removedTriangles: totalRemoved };
+  root.userData.avatarAceFemaleHeadRemoval = result;
+  return result;
 }
 
 function findExactHeadBone(root: THREE.Object3D): THREE.Bone | null {
