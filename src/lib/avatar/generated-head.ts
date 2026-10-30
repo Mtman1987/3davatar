@@ -7,6 +7,7 @@ export type GeneratedHeadManifest = {
   neutral_base_obj?: string;
   blendshapes_json?: string;
   armature_json?: string | null;
+  facial_landmarks_json?: string | null;
   detail_maps?: Record<string, string | null> | null;
   num_vertices?: number;
   num_triangles?: number;
@@ -18,6 +19,15 @@ export type GeneratedHeadBlendshapes = {
   units?: string;
   num_vertices: number;
   blendshapes: Record<string, number[][]>;
+};
+
+export type GeneratedHeadFacialLandmarks = {
+  version?: string;
+  coordinate_space?: string;
+  units?: string;
+  landmark_count: number;
+  source?: string;
+  points: [number, number, number][];
 };
 
 export type GeneratedHeadArmature = {
@@ -323,22 +333,36 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     throw new Error("Generated head manifest must reference neutral_base_obj and blendshapes_json.");
   }
 
-  const [objResponse, morphResponse, rigResponse] = await Promise.all([
+  const [objResponse, morphResponse, rigResponse, landmarksResponse] = await Promise.all([
     fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.neutral_base_obj)),
     fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.blendshapes_json)),
     manifest.armature_json
       ? fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.armature_json))
       : Promise.resolve(null),
+    manifest.facial_landmarks_json
+      ? fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.facial_landmarks_json))
+      : Promise.resolve(null),
   ]);
   if (!objResponse.ok) throw new Error("Generated head OBJ request failed: HTTP " + objResponse.status);
   if (!morphResponse.ok) throw new Error("Generated head morph request failed: HTTP " + morphResponse.status);
   if (rigResponse && !rigResponse.ok) throw new Error("Generated head rig request failed: HTTP " + rigResponse.status);
+  if (landmarksResponse && !landmarksResponse.ok) throw new Error("Generated facial landmarks request failed: HTTP " + landmarksResponse.status);
 
-  const [objText, morphs, rig] = await Promise.all([
+  const [objText, morphs, rig, facialLandmarks] = await Promise.all([
     objResponse.text(),
     morphResponse.json() as Promise<GeneratedHeadBlendshapes>,
     rigResponse ? rigResponse.json() as Promise<GeneratedHeadArmature> : Promise.resolve(null),
+    landmarksResponse ? landmarksResponse.json() as Promise<GeneratedHeadFacialLandmarks> : Promise.resolve(null),
   ]);
+  if (facialLandmarks && (
+    facialLandmarks.coordinate_space !== "same_as_neutral_base_obj" ||
+    facialLandmarks.units !== "meters" ||
+    facialLandmarks.points.length !== facialLandmarks.landmark_count ||
+    facialLandmarks.landmark_count < 478 ||
+    facialLandmarks.points.some((point) => point.length !== 3 || point.some((value) => !Number.isFinite(value)))
+  )) {
+    throw new Error("Generated facial landmark asset has invalid coordinates or metadata.");
+  }
   const built = buildGeneratedHeadGeometry(objText, morphs, rig);
   const group = new THREE.Group();
   group.name = "AvatarAceNativeGeneratedHead";
@@ -418,6 +442,8 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     sourceTriangleCount: built.geometry.getAttribute("position").count / 3,
     morphNames: Object.keys(morphs.blendshapes),
     hasFacialRig: Boolean(rig),
+    facialLandmarks: facialLandmarks?.points ?? null,
+    facialLandmarkSource: facialLandmarks?.source ?? null,
   };
   group.updateMatrixWorld(true);
   return group;
