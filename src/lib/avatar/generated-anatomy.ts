@@ -152,6 +152,7 @@ export function buildGeneratedFacialAnatomy(
   mouth.userData.upperTeeth = upperTeeth;
   mouth.userData.lowerTeeth = lowerTeeth;
   mouth.userData.tongue = tongue;
+  mouth.userData.tongueBaseZ = tongue.position.z;
   mouth.userData.neutralGap = neutralGap;
   mouth.userData.toothHeight = toothHeight;
   root.add(mouth);
@@ -193,6 +194,9 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     Math.max(weights.mouthSmileLeft ?? 0, weights.mouthSmileRight ?? 0, weights.mouthSmile ?? 0, weights.smile ?? 0),
     0, 1,
   );
+  const close = THREE.MathUtils.clamp(weights.mouthClose ?? 0, 0, 1);
+  const round = THREE.MathUtils.clamp(Math.max(weights.mouthFunnel ?? 0, weights.mouthPucker ?? 0), 0, 1);
+  const tongueOut = THREE.MathUtils.clamp(weights.tongueOut ?? 0, 0, 1);
   // The exported jaw joint is the skeletal counterpart to the jawOpen
   // morph target. Keep its bind rotation neutral every frame, then apply a
   // restrained anatomical rotation so the lower face and fitted jaw props
@@ -207,17 +211,23 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   const neutralGap = Number(mouth.userData.neutralGap ?? 0.0015);
   const toothHeight = Number(mouth.userData.toothHeight ?? 0.0015);
   const cavityWidth = Number(mouth.userData.cavityWidth ?? 0.02);
-  const opening = 1 + jaw * 7;
-  // Talking opens the cavity and lowers the jaw parts; smiling widens the
-  // corners and gently flattens the opening instead of fighting jaw motion.
+  const opening = (1 + jaw * 7) * (1 - close * 0.88);
+  const tongueBaseZ = Number(mouth.userData.tongueBaseZ ?? 0);
+  // Speech controls aperture and rounding independently. A smile widens the
+  // corners; pucker/funnel rounds the opening; mouthClose can bring the lips
+  // together without forcing the jaw bone to snap shut.
   if (cavity) {
-    cavity.scale.set(1 + smile * 0.2, opening * (1 - smile * 0.32), 1);
+    cavity.scale.set(1 + smile * 0.2 - round * 0.28, opening * (1 - smile * 0.32), 1);
     cavity.position.y = smile * cavityWidth * 0.025;
   }
   const jawDrop = jaw * Math.max(neutralGap * 5, 0.012);
   for (const tooth of upperTeeth ?? []) tooth.position.y = neutralGap * 0.42 + toothHeight * 0.5 + smile * cavityWidth * 0.025;
   for (const tooth of lowerTeeth ?? []) tooth.position.y = -neutralGap * 0.42 - toothHeight * 0.5 - jawDrop;
-  if (tongue) tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
+  if (tongue) {
+    tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
+    tongue.position.z = tongueBaseZ + tongueOut * cavityWidth * 0.22;
+    tongue.scale.y = 0.32 + tongueOut * 0.12;
+  }
   for (const [index, corner] of (corners ?? []).entries()) {
     const side = index === 0 ? -1 : 1;
     corner.position.x = side * cavityWidth * (0.48 + smile * 0.08);
