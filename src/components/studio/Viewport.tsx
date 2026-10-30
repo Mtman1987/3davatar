@@ -126,7 +126,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       // AI cohost idle acting is local and camera-free. Live tracking replaces
       // these non-speech expressions when explicitly enabled; audio always
       // owns speech articulation so a camera cannot cancel the spoken mouth.
-      const cohostWeights = tracking ? {} : autonomousCohostWeights(cohostTime);
+      const speechActivity = Math.max(sound?.jawOpen ?? 0, sound?.mouthLowerDownLeft ?? 0, sound?.mouthLowerDownRight ?? 0);
+      const cohostWeights = tracking ? {} : autonomousCohostWeights(cohostTime, clamp((speechActivity - 0.035) * 2.4, 0, 1));
       const allWeights: Record<string,number> = {...presetWeights,...cohostWeights,...(tracking ?? {}),...(sound ?? {}),...(current.manualMorphs ?? {})};
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       // The reconstructed head is the authoritative ARKit face rig. Drive it
@@ -649,7 +650,7 @@ function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
   return canvas;
 }
 
-function autonomousCohostWeights(time: number): Record<string, number> {
+function autonomousCohostWeights(time: number, speaking = 0): Record<string, number> {
   // A small repertoire of coordinated, low-intensity social expressions.
   // Each state eases in and out over several seconds; the face never jumps
   // between poses. Speech weights are layered after this function, so audio
@@ -664,11 +665,14 @@ function autonomousCohostWeights(time: number): Record<string, number> {
   const curious = smoothPulse(time + 1.7, 19, 0.19);
   const warm = smoothPulse(time + 9.2, 23, 0.2);
   const thoughtful = smoothPulse(time + 14.1, 27, 0.17);
-  const gaze = Math.sin(time * 0.27) * 0.42 + Math.sin(time * 0.105 + 1.4) * 0.16;
-  const verticalGaze = Math.sin(time * 0.16 + 0.7) * 0.13;
+  const speech = clamp(speaking, 0, 1);
+  // While speaking, hold eye contact a little longer and let attention show
+  // in the brows. Keep a little natural gaze drift rather than freezing.
+  const gaze = (Math.sin(time * 0.27) * 0.42 + Math.sin(time * 0.105 + 1.4) * 0.16) * (1 - speech * 0.58);
+  const verticalGaze = Math.sin(time * 0.16 + 0.7) * 0.13 * (1 - speech * 0.35);
   const smile = 0.025 + warm * 0.105 + attentive * 0.018;
-  const browLift = 0.018 + curious * 0.16 + attentive * 0.055;
-  const eyeOpen = 0.018 + attentive * 0.055 + curious * 0.075;
+  const browLift = 0.018 + curious * 0.16 + attentive * 0.055 + speech * 0.045;
+  const eyeOpen = 0.018 + attentive * 0.055 + curious * 0.075 + speech * 0.025;
   return {
     eyeLookOutLeft: clamp(gaze, 0, 0.22),
     eyeLookInLeft: clamp(-gaze, 0, 0.22),
