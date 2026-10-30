@@ -472,6 +472,7 @@ function Studio({
           headZ={state.headZ}
           expression={state.expression}
           faceRev={state.faceRev}
+          blinkSpeed={blinkSpeed}
           sampleSound={() => engineRef.current?.sample() ?? null}
         />
         <div className="safe-top pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3">
@@ -498,7 +499,7 @@ function Studio({
           {state.panel === "finished" ? <FinishedPanel animationIndex={animationIndex} onAnimationChange={setAnimationIndex} animationPlaying={animationPlaying} onToggleAnimation={() => setAnimationPlaying((playing) => !playing)} morphWeights={morphWeights} onMorphChange={(name, value) => setMorphWeights((current) => ({ ...current, [name]: value }))} onResetMorphs={() => setMorphWeights(Object.fromEntries(state.morphNames.map((name) => [name, 0])))} /> : null}
           {state.panel === "look" ? <LookPanel /> : null}
           {state.panel === "face" ? (
-            <FacePanel onCamera={onCamera} onLibrary={onLibrary} onSample={onSample} />
+            <FacePanel onCamera={onCamera} onLibrary={onLibrary} onSample={onSample} blinkSpeed={blinkSpeed} onBlinkSpeedChange={setBlinkSpeed} />
           ) : null}
           {state.panel === "voice" ? (
             <VoicePanel
@@ -649,7 +650,7 @@ function LookPanel() {
   );
 }
 
-function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; onLibrary: () => void; onSample: () => void }) {
+function FacePanel({ onCamera, onLibrary, onSample, blinkSpeed, onBlinkSpeedChange }: { onCamera: () => void; onLibrary: () => void; onSample: () => void; blinkSpeed: number; onBlinkSpeedChange: (value: number) => void }) {
   const state = useStudio();
   return (
     <div className="space-y-4">
@@ -711,7 +712,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
       <Slider label="Height" min={-0.06} max={0.08} step={0.005} value={state.headY} onChange={(headY) => state.patch({ headY })} />
       <Slider label="Depth" min={-0.04} max={0.1} step={0.005} value={state.headZ} onChange={(headZ) => state.patch({ headZ })} />
       <Slider label="Expression" min={0} max={1.4} step={0.01} value={state.expression} onChange={(expression) => state.patch({ expression })} />
-      <Slider label="Blink speed" min={0.08} max={0.8} step={0.01} value={blinkSpeed} onChange={setBlinkSpeed} />
+      <Slider label="Blink speed" min={0.08} max={0.8} step={0.01} value={blinkSpeed} onChange={onBlinkSpeedChange} />
     </div>
   );
 }
