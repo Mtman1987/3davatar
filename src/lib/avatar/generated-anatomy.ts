@@ -17,19 +17,54 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   const eye = new THREE.Group();
   eye.name = "AvatarAceEye_" + side;
   const contour = ring.map((index) => point(points, index));
-  const center = point(points, centerIndex);
+  // Iris landmarks (468/473) sit on the FRONT surface of the eye; they are
+  // not the eyeball centre. Derive the globe centre from the eyelid aperture
+  // and recess it behind the face instead of placing a full sphere at the iris.
+  const irisCenter = point(points, centerIndex);
+  const center = contour.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / contour.length);
   const width = Math.max(...contour.map((p) => p.x)) - Math.min(...contour.map((p) => p.x));
   const height = Math.max(...contour.map((p) => p.y)) - Math.min(...contour.map((p) => p.y));
-  const radius = Math.max(width * 0.48, height * 0.9, 0.006);
+  const radius = Math.max(width * 0.49, height * 0.82, 0.004);
+  const lidDepth = contour.reduce((sum, p) => sum + p.z, 0) / contour.length;
   const eyeball = new THREE.Mesh(
-    new THREE.SphereGeometry(radius, 24, 16),
-    new THREE.MeshStandardMaterial({ color: 0xf4eee5, roughness: 0.28 }),
+    new THREE.SphereGeometry(1, 32, 24),
+    new THREE.MeshStandardMaterial({ color: 0xf4eee5, roughness: 0.24 }),
   );
   eyeball.name = "AvatarAceEyeball_" + side;
-  const lidDepth = contour.reduce((sum, p) => sum + p.z, 0) / contour.length;
-  eyeball.position.set(center.x, center.y, center.z + frontSign * radius * 0.12);
-  eyeball.scale.set(1, Math.max(0.62, height / Math.max(width, 0.001)), 0.72);
+  eyeball.position.set(center.x, center.y, lidDepth - frontSign * radius * 0.24);
+  eyeball.scale.set(width * 0.51, Math.max(height * 0.76, width * 0.20), radius * 0.62);
   eye.add(eyeball);
+
+  // The iris landmarks anchor a layered iris/pupil on the globe surface.
+  // These are small surface details, not additional protruding eyeballs.
+  const irisRadius = Math.max(width * 0.19, 0.0012);
+  const iris = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 32, 20),
+    new THREE.MeshStandardMaterial({ color: 0x59402d, roughness: 0.34 }),
+  );
+  iris.name = "AvatarAceIris_" + side;
+  iris.position.set(irisCenter.x, irisCenter.y, irisCenter.z + frontSign * radius * 0.025);
+  iris.scale.set(irisRadius, irisRadius, irisRadius * 0.16);
+  eye.add(iris);
+
+  const pupil = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 24, 16),
+    new THREE.MeshStandardMaterial({ color: 0x100d0b, roughness: 0.16 }),
+  );
+  pupil.name = "AvatarAcePupil_" + side;
+  pupil.position.set(irisCenter.x, irisCenter.y, iris.position.z + frontSign * irisRadius * 0.12);
+  pupil.scale.set(irisRadius * 0.39, irisRadius * 0.39, irisRadius * 0.10);
+  eye.add(pupil);
+
+  const cornea = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 24, 16),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.06, transmission: 0.08, transparent: true, opacity: 0.18, depthWrite: false }),
+  );
+  cornea.name = "AvatarAceCornea_" + side;
+  cornea.position.copy(iris.position);
+  cornea.position.z += frontSign * irisRadius * 0.12;
+  cornea.scale.set(irisRadius * 1.12, irisRadius * 1.12, irisRadius * 0.20);
+  eye.add(cornea);
 
   // Build separate upper and lower fitted lid patches. Each patch collapses
   // to the measured lid margin when open, then advances across half the eye
@@ -120,15 +155,21 @@ export function buildGeneratedFacialAnatomy(
   const lowerTeeth: THREE.Mesh[] = [];
   for (let i = 0; i < 6; i++) {
     const x = (i - 2.5) * toothWidth * 0.91;
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, toothHeight, mouthWidth * 0.045), toothMaterial);
+    // Rounded enamel crowns read as teeth at this avatar scale; the previous
+    // flat boxes produced a single floating bar. Keep the same jaw-driven
+    // positions so speech animation remains unchanged.
+    const crownGeometry = new THREE.SphereGeometry(1, 20, 14);
+    const upper = new THREE.Mesh(crownGeometry, toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
     upper.position.set(x, neutralGap * 0.42 + toothHeight * 0.5, cavity.position.z + frontSign * detailDepth * 0.55);
+    upper.scale.set(toothWidth * 0.43, toothHeight * 0.58, mouthWidth * 0.035);
     mouth.add(upper);
     upperTeeth.push(upper);
 
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, toothHeight, mouthWidth * 0.045), toothMaterial);
+    const lower = new THREE.Mesh(crownGeometry.clone(), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
     lower.position.set(x, -neutralGap * 0.42 - toothHeight * 0.5, cavity.position.z + frontSign * detailDepth * 0.55);
+    lower.scale.set(toothWidth * 0.43, toothHeight * 0.58, mouthWidth * 0.035);
     mouth.add(lower);
     lowerTeeth.push(lower);
   }
