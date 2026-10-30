@@ -148,23 +148,44 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         return;
       }
 
-      const bounds = new THREE.Box3().setFromObject(gltf.scene);
-      if (bounds.isEmpty()) {
-        disposeModel(gltf.scene);
-        propsRef.current.onError?.("Reconstructed head GLB contains no visible geometry.");
-        return;
-      }
-
-      // The reconstruction is exported as a head-centred, Y-up GLB. Place its
-      // bottom at the female rig's actual head joint and center it on that joint.
-      // Keep the GLB scene/materials intact so its embedded photo texture survives.
-      const center = bounds.getCenter(new THREE.Vector3());
-      gltf.scene.position.set(-center.x, -bounds.min.y, -center.z);
+      // Attach first, then measure in the attachment's own coordinate frame.
+      // Box3.setFromObject reports world-space bounds; using those values as
+      // GLTF-root local offsets breaks when the exported scene has transforms.
       const attachment = new THREE.Group();
       attachment.name = "AvatarAceReconstructedHead";
       attachment.add(gltf.scene);
       headBone.add(attachment);
       loaded.root.updateMatrixWorld(true);
+      attachment.updateMatrixWorld(true);
+
+      const worldBounds = new THREE.Box3().setFromObject(gltf.scene);
+      if (worldBounds.isEmpty()) {
+        headBone.remove(attachment);
+        disposeModel(attachment);
+        propsRef.current.onError?.("Reconstructed head GLB contains no visible geometry.");
+        return;
+      }
+
+      const localBounds = new THREE.Box3();
+      const corner = new THREE.Vector3();
+      for (let x = 0; x <= 1; x++) {
+        for (let y = 0; y <= 1; y++) {
+          for (let z = 0; z <= 1; z++) {
+            corner.set(
+              x ? worldBounds.max.x : worldBounds.min.x,
+              y ? worldBounds.max.y : worldBounds.min.y,
+              z ? worldBounds.max.z : worldBounds.min.z,
+            );
+            localBounds.expandByPoint(attachment.worldToLocal(corner.clone()));
+          }
+        }
+      }
+
+      // Seat the reconstructed head at the head-bone origin without changing
+      // the GLB's internal mesh, material, texture, or scale.
+      const center = localBounds.getCenter(new THREE.Vector3());
+      attachment.position.set(-center.x, -localBounds.min.y, -center.z);
+      attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
     }, undefined, (error) => {
       if (cancelled) return;
@@ -350,44 +371,55 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
 }
 
 function removeOriginalFemaleHead(root: THREE.Object3D) {
-  // Female base GLB joint indices: head=103, jaw=104. Keep the neck
-  // transition intact; remove only triangles dominated by head/jaw weights.
-  const HEAD_JOINT = 103;
-  const JAW_JOINT = 104;
-  const MIN_SOURCE_Y = 1.385;
-  const MIN_COMBINED_WEIGHT = 0.55;
+  // skinIndex values address this mesh's Skeleton.bones array, not scene-node
+  // indices. Resolve head/jaw by each mesh's actual skeleton names so separate
+  // GLB primitives and skins cannot silently use the wrong joint numbers.
+  const normalizeBoneName = (name: string) => name.toLowerCase().replace(/[^a-z]/g, "");
+  let totalRemoved = 0;
+  let eligibleMeshes = 0;
 
+  root.updateMatrixWorld(true);
   root.traverse((object) => {
     const mesh = object as THREE.SkinnedMesh;
-    if (!mesh.isMesh || !mesh.geometry || !mesh.isSkinnedMesh) return;
+    if (!mesh.isMesh || !mesh.geometry || !mesh.isSkinnedMesh || !mesh.skeleton) return;
     const geometry = mesh.geometry;
     const skinIndex = geometry.getAttribute("skinIndex");
     const skinWeight = geometry.getAttribute("skinWeight");
     const position = geometry.getAttribute("position");
     if (!skinIndex || !skinWeight || !position) return;
 
+    const headIndex = mesh.skeleton.bones.findIndex((bone) => normalizeBoneName(bone.name) === "head");
+    const jawIndex = mesh.skeleton.bones.findIndex((bone) => /^(jaw|jawjoint)$/.test(normalizeBoneName(bone.name)));
+    if (headIndex < 0 && jawIndex < 0) return;
+    eligibleMeshes++;
+
     const index = geometry.getIndex();
-    if (!index) return;
+    const elementCount = index ? index.count : position.count;
     const kept: number[] = [];
     let removed = 0;
 
-    for (let i = 0; i < index.count; i += 3) {
-      let combined = 0;
-      let centerY = 0;
+    for (let i = 0; i + 2 < elementCount; i += 3) {
+      let headJawWeight = 0;
       for (let corner = 0; corner < 3; corner++) {
-        const vertex = index.getX(i + corner);
-        centerY += position.getY(vertex) / 3;
+        const vertex = index ? index.getX(i + corner) : i + corner;
         for (let slot = 0; slot < 4; slot++) {
           const joint = skinIndex.getComponent(vertex, slot);
-          if (joint === HEAD_JOINT || joint === JAW_JOINT) {
-            combined += skinWeight.getComponent(vertex, slot) / 3;
+          if (joint === headIndex || joint === jawIndex) {
+            headJawWeight += skinWeight.getComponent(vertex, slot) / 3;
           }
         }
       }
-      if (centerY >= MIN_SOURCE_Y && combined >= MIN_COMBINED_WEIGHT) {
+
+      // Use skinning influence rather than a hard-coded source-space Y plane:
+      // different mesh primitives can have different local transforms/origins.
+      if (headJawWeight >= 0.55) {
         removed++;
       } else {
-        kept.push(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+        kept.push(
+          index ? index.getX(i) : i,
+          index ? index.getX(i + 1) : i + 1,
+          index ? index.getX(i + 2) : i + 2,
+        );
       }
     }
 
@@ -395,8 +427,11 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
       geometry.setIndex(kept);
       geometry.computeVertexNormals();
       mesh.userData.avatarAceOriginalHeadTrianglesRemoved = removed;
+      totalRemoved += removed;
     }
   });
+
+  root.userData.avatarAceFemaleHeadRemoval = { eligibleMeshes, removedTriangles: totalRemoved };
 }
 
 function findExactHeadBone(root: THREE.Object3D): THREE.Bone | null {
