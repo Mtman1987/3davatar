@@ -422,21 +422,21 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
   // skinIndex values address this mesh's Skeleton.bones array, not scene-node
   // indices. Resolve head/jaw by each mesh's actual skeleton names so separate
   // GLB primitives and skins cannot silently use the wrong joint numbers.
-  const normalizeBoneName = (name: string) => name.toLowerCase().replace(/[^a-z]/g, "");
+  const normalizeBoneName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
   let totalRemoved = 0;
   let eligibleMeshes = 0;
   let removedSeparateMeshes = 0;
 
   root.updateMatrixWorld(true);
-  // Some base GLBs store the skull/face as a separate unskinned mesh. The
-  // weighted-triangle pass below cannot touch those objects, so remove only
-  // independently named head/face parts; never delete a combined body mesh.
+  // Remove independently modelled original facial parts too. These can be
+  // separate unskinned objects (eyes/eyeballs/iris) and are not covered by
+  // the weighted triangle pass.
   const separateHeadParts: THREE.Mesh[] = [];
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
-    const name = mesh.name.toLowerCase().replace(/[^a-z]/g, "");
-    if (/^(head|face|skull|cranium|originalhead|originalface)$/.test(name)) {
+    const name = normalizeBoneName(mesh.name);
+    if (/^(head|face|skull|cranium|originalhead|originalface|eye[lr]?|eyeball[lr]?|iris[lr]?|pupil[lr]?|cornea[lr]?)$/.test(name)) {
       separateHeadParts.push(mesh);
     }
   });
@@ -455,15 +455,34 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
     const position = geometry.getAttribute("position");
     if (!skinIndex || !skinWeight || !position) return;
 
-    const headIndex = mesh.skeleton.bones.findIndex((bone) => {
+    // The eyes and jaw are child joints of the head in these rigs. Include
+    // the complete head-bone subtree so facial geometry weighted to eye.L,
+    // eye.R, jaw, etc. is removed along with the skull.
+    const headRoots = mesh.skeleton.bones.filter((bone) => {
       const name = normalizeBoneName(bone.name);
-      return name === "head" || name.endsWith("head") || name === "skull";
+      return name === "head" || name === "headjoint" || name === "mixamorighead" || name === "skull";
     });
-    const jawIndex = mesh.skeleton.bones.findIndex((bone) => {
+    const headJointIndices = new Set<number>();
+    mesh.skeleton.bones.forEach((bone, boneIndex) => {
+      let current: THREE.Bone | null = bone;
+      while (current) {
+        if (headRoots.includes(current)) {
+          headJointIndices.add(boneIndex);
+          break;
+        }
+        current = current.parent as THREE.Bone | null;
+        if (current && !current.isBone) break;
+      }
+    });
+    // Some exports have jaw/eye joints outside the head hierarchy; include
+    // those explicit facial joints as a safe fallback.
+    mesh.skeleton.bones.forEach((bone, boneIndex) => {
       const name = normalizeBoneName(bone.name);
-      return name === "jaw" || name.endsWith("jaw");
+      if (/^(?:jaw|eyel|eyer|eyeleft|eyeright|eyeball|iris|pupil|cornea)(?:\d+)?$/.test(name)) {
+        headJointIndices.add(boneIndex);
+      }
     });
-    if (headIndex < 0 && jawIndex < 0) return;
+    if (headJointIndices.size === 0) return;
     eligibleMeshes++;
 
     const index = geometry.getIndex();
@@ -486,7 +505,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
           const vertex = index ? index.getX(i + corner) : i + corner;
           for (let slot = 0; slot < 4; slot++) {
             const joint = skinIndex.getComponent(vertex, slot);
-            if (joint === headIndex || joint === jawIndex) {
+            if (headJointIndices.has(joint)) {
               headJawWeight += skinWeight.getComponent(vertex, slot) / 3;
             }
           }
