@@ -180,6 +180,9 @@ export function weightsFromSpectrum(
   return {
     jawOpen: open * 0.92,
     jawForward: open * 0.12,
+    // Move the lower lip with the jaw so the mouth visibly opens.
+    mouthLowerDownLeft: open * 0.72,
+    mouthLowerDownRight: open * 0.72,
     mouthFunnel: rounded * 0.55,
     mouthPucker: clamp(rounded - spread * 0.4) * 0.45,
     mouthSmileLeft: spread * 0.4,
@@ -200,6 +203,8 @@ export function scriptWeights(t: number): Weights {
   const open = syllable * 0.8;
   return {
     jawOpen: open,
+    mouthLowerDownLeft: open * 0.72,
+    mouthLowerDownRight: open * 0.72,
     mouthFunnel: open * round * 0.5,
     mouthPucker: open * round * 0.28,
     mouthSmileLeft: open * (1 - round) * 0.32,
