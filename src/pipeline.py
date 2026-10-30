@@ -593,10 +593,24 @@ class FaceGeoPipeline:
             "per_view": [{"psi": vf.psi.tolist(), "pose_theta": vf.pose_theta.tolist()} for vf in view_fits],
             "note": "Export is neutral (psi=0, theta=0); per-view expression is metadata only.",
         }
+        # Map the canonical 478 MediaPipe landmarks onto this subject's fitted
+        # neutral FLAME surface. These per-subject 3D anchors are the basis for
+        # fitting real eyelid/lip/mouth geometry; never use fixed template offsets.
+        embedding_path = ROOT / self._c("stage2").get(
+            "mediapipe_embedding", "data/flame_model/mediapipe_embedding_open.npz"
+        )
+        embedding = np.load(embedding_path)
+        landmark_faces = faces[embedding["face_idx"]]
+        landmark_bary = embedding["bary"]
+        facial_landmarks_3d = (
+            neutral_vertices[landmark_faces] * landmark_bary[..., None]
+        ).sum(axis=1).astype(np.float32)
+
         output_paths = self._export(
             vertices=neutral_vertices, faces=faces, detail_maps=detail_maps,
             expression_metadata=expression_metadata, beta=beta, photo_paths=[p for p, _ in pairs],
             output_dir=output_dir, facial_hair_manifest=facial_hair_manifest, status=status,
+            facial_landmarks_3d=facial_landmarks_3d,
             extra={
                 "view_fits": [vf.to_dict() for vf in view_fits],
                 "texture_fractions": fill_fractions,
@@ -765,6 +779,7 @@ class FaceGeoPipeline:
         output_dir: Path,
         facial_hair_manifest: Optional[dict],
         status: Dict[str, Any],
+        facial_landmarks_3d: Optional[np.ndarray] = None,
         extra: Optional[dict] = None,
     ) -> Dict[str, Any]:
         uv, uvf = self.uv_layout()
@@ -792,7 +807,8 @@ class FaceGeoPipeline:
                 return exporter.export_production_asset(
                     neutral_vertices=vertices, faces=faces, output_dir=output_dir,
                     export_fbx=bool(c5.get("export_fbx", True)), stylization_params=c5.get("stylize"),
-                    detail_maps=detail_maps, facial_hair_manifest=facial_hair_manifest)
+                    detail_maps=detail_maps, facial_hair_manifest=facial_hair_manifest,
+                    facial_landmarks_3d=facial_landmarks_3d)
             stage5_manifest = self._run_optional(status, "stage5_export", _stage5) or {}
 
         manifest = {
