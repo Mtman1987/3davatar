@@ -164,6 +164,10 @@ export function StudioApp() {
           onCamera={() => cameraRef.current?.click()}
           onLibrary={() => libraryRef.current?.click()}
           onSample={() => void useSample()}
+          onOpenSaved={() => {
+            engineRef.current?.stop();
+            patch({ screen: "library", talk: "off" });
+          }}
           refreshSaves={async () => setSaved(await listAvatars())}
         />
       ) : null}
@@ -296,6 +300,7 @@ function Studio({
   onCamera,
   onLibrary,
   onSample,
+  onOpenSaved,
   refreshSaves,
 }: {
   engineRef: RefObject<Sound2Face | null>;
@@ -303,6 +308,7 @@ function Studio({
   onCamera: () => void;
   onLibrary: () => void;
   onSample: () => void;
+  onOpenSaved: () => void;
   refreshSaves: () => Promise<void>;
 }) {
   const state = useStudio();
@@ -503,7 +509,7 @@ function Studio({
             />
           ) : null}
           {state.panel === "save" ? (
-            <SavePanel note={saveNote} finishedModel={Boolean(state.modelUrl)} morphCount={state.morphNames.length} onDownload={() => void download()} onKeep={() => void keep()} />
+            <SavePanel note={saveNote} finishedModel={Boolean(state.modelUrl)} morphCount={state.morphNames.length} onDownload={() => void download()} onKeep={() => void keep()} onOpenSaved={onOpenSaved} />
           ) : null}
         </div>
         <nav className="grid grid-cols-6 border-t border-border">
@@ -781,7 +787,7 @@ function VoicePanel({
   );
 }
 
-function SavePanel({ note, finishedModel, morphCount, onDownload, onKeep }: { note: string | null; finishedModel: boolean; morphCount: number; onDownload: () => void; onKeep: () => void }) {
+function SavePanel({ note, finishedModel, morphCount, onDownload, onKeep, onOpenSaved }: { note: string | null; finishedModel: boolean; morphCount: number; onDownload: () => void; onKeep: () => void; onOpenSaved: () => void }) {
   return (
     <div className="space-y-3">
       <h2 className="font-display text-xl text-fg">Your avatar is ready</h2>
@@ -795,6 +801,9 @@ function SavePanel({ note, finishedModel, morphCount, onDownload, onKeep }: { no
       </button>
       <button type="button" className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-fg" onClick={onKeep}>
         <Check className="size-4" /> Save on this phone
+      </button>
+      <button type="button" className="h-11 w-full rounded-full border border-border text-sm text-fg" onClick={onOpenSaved}>
+        Open a saved avatar
       </button>
       {note ? <p className="text-sm text-fg">{note}</p> : null}
     </div>
