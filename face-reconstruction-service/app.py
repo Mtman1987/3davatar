@@ -159,7 +159,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             "num_vertices": stage5.get("num_vertices"),
             "num_triangles": stage5.get("num_triangles"),
             "arkit_blendshapes_count": stage5.get("arkit_blendshapes_count"),
-            "units": "millimeters",
+            "units": "meters",
             "attachment": {"joint": "head", "coordinate_space": "neck-root"},
         }
         (output_dir / "avatarace_head_manifest.json").write_text(json.dumps(browser_manifest, indent=2))
