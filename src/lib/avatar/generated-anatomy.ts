@@ -277,11 +277,35 @@ export function buildGeneratedFacialAnatomy(
 export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28, jawBone?: THREE.Bone | null, eyeDepthOffset = 0, mouthDepthOffset = 0) {
   const data = root.userData.avatarAceAnatomy as { eyes: THREE.Group[]; mouth: THREE.Group } | undefined;
   if (!data) return;
-  const clock = Number(root.userData.autoBlinkClock ?? 1.25) + Math.max(0, delta);
-  root.userData.autoBlinkClock = clock % 20;
-  const cycle = (clock * THREE.MathUtils.clamp(blinkSpeed, 0.08, 0.8)) % 1;
-  const blinkWindow = 0.11;
-  const autoBlink = cycle < blinkWindow ? Math.sin((cycle / blinkWindow) * Math.PI) : 0;
+  // Human blinks are brief and irregular, not a metronomic loop. Keep the
+  // schedule on this anatomy instance so every cohost has its own cadence.
+  const safeDelta = Math.max(0, Math.min(delta, 0.1));
+  let blinkClock = Number(root.userData.autoBlinkClock ?? 0);
+  let blinkRemaining = Number(root.userData.autoBlinkRemaining ?? 0);
+  let nextBlink = Number(root.userData.autoBlinkNext ?? 3.2);
+  let blinkDuration = Number(root.userData.autoBlinkDuration ?? 0.16);
+  let blinkSeed = Number(root.userData.autoBlinkSeed ?? (0.17 + Math.random() * 0.66));
+  const speed = THREE.MathUtils.clamp(blinkSpeed, 0.08, 0.8);
+  blinkClock += safeDelta;
+  blinkRemaining = Math.max(0, blinkRemaining - safeDelta);
+  nextBlink -= safeDelta;
+  if (nextBlink <= 0 && blinkRemaining <= 0) {
+    blinkSeed = (blinkSeed * 3.731 + 0.173) % 1;
+    blinkDuration = (0.13 + blinkSeed * 0.07) * (0.28 / speed);
+    blinkRemaining = blinkDuration;
+    blinkSeed = (blinkSeed * 5.173 + 0.319) % 1;
+    // A small chance of a natural quick double-blink; otherwise vary the
+    // next interval between roughly 2.8 and 5.3 seconds at the default rate.
+    const doubleBlink = blinkSeed > 0.84;
+    nextBlink = doubleBlink ? 0.24 : (0.78 + blinkSeed * 0.7) / speed;
+  }
+  root.userData.autoBlinkClock = blinkClock % 60;
+  root.userData.autoBlinkRemaining = blinkRemaining;
+  root.userData.autoBlinkNext = nextBlink;
+  root.userData.autoBlinkDuration = blinkDuration;
+  root.userData.autoBlinkSeed = blinkSeed;
+  const blinkProgress = blinkRemaining > 0 ? 1 - blinkRemaining / Math.max(blinkDuration, 0.001) : 0;
+  const autoBlink = blinkRemaining > 0 ? Math.sin(blinkProgress * Math.PI) : 0;
   const frontSign = Number(root.userData.avatarAceAnatomy && (root.userData.avatarAceAnatomy as { frontSign?: number }).frontSign) || 1;
   for (const [index, eye] of data.eyes.entries()) {
     // One shared calibration offset keeps both eyes seated consistently.
