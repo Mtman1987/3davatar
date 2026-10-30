@@ -6,7 +6,7 @@ This separate CPU service runs the repository's actual photo-to-head pipeline. P
 
 The normal `npm run dev` command starts both Vite and the local FastAPI adapter. It generates a per-run local token and passes it only to the server processes; the browser never receives it. No Fly or Oracle service is involved in local development.
 
-The launcher prefers the sibling `../Humanoid-Face-3D` checkout documented in the verified Termux workflow when it contains `scripts/run_pipeline.py`; otherwise it uses this repository's pipeline. It also prefers that checkout's `.venv` Python. Override with `FACE_PIPELINE_ROOT`, `FACE_PYTHON_BIN`, or `FACE_MODEL_DIR` when needed.
+The launcher always runs reconstruction source code from this AvatarAce checkout. It may reuse the existing sibling `../Humanoid-Face-3D/.venv` Python environment on Termux to avoid reinstalling the heavy MediaPipe/PyTorch stack, and may reuse model-only assets from that sibling folder when they are not present in AvatarAce. No Python source files are loaded from the sibling checkout. `FACE_PIPELINE_ROOT` is an explicit advanced override; normal startup sets it to AvatarAce. `FACE_PYTHON_BIN`, `FACE_MODEL_DIR`, and `FACE_MEDIAPIPE_MODEL_DIR` can also be overridden.
 
 Install the adapter's small web-server dependencies into the Python environment selected by the launcher if they are not already installed:
 
@@ -21,7 +21,8 @@ On Termux, run those commands from the AvatarAce repository root. If the shell d
 
 - `FACE_RECONSTRUCTION_TOKEN`: required shared secret used by the app's server-side proxy and this service.
 - `FACE_MODEL_DIR`: mounted directory containing the licensed `flame2023_open.pkl`, `region_masks_open.npz`, `uv_layout_open.npz`, and `mediapipe_embedding_open.npz` clean-room support assets.
-- `FACE_PIPELINE_ROOT`: pipeline checkout (defaults to `/opt/humanoid-face`).
+- `FACE_PIPELINE_ROOT`: pipeline source root (AvatarAce sets this to its own checkout; the container sets `/opt/humanoid-face`).
+- `FACE_MEDIAPIPE_MODEL_DIR`: directory containing the public MediaPipe face-landmarker and selfie-segmentation task files. The local launcher can reuse these model-only files from the sibling checkout while executing all Python source from AvatarAce.
 - `FACE_WORK_ROOT`: persistent job output directory.
 - `FACE_MAX_UPLOAD_BYTES`: combined photo upload limit (defaults to 12 MiB).
 - `FACE_RECONSTRUCTION_DETAIL`: Stage 3 detail level passed to the proven pipeline runner (defaults to `0`, the verified Termux command; set higher values to request additional sculpt detail).
