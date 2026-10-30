@@ -203,3 +203,94 @@ export function generatedHeadAssetUrl(
 ): string {
   return resolveAssetUrl(relativePath, manifestUrl);
 }
+
+
+/** Fetch and assemble the Stage5 manifest plus its native companion assets. */
+export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THREE.Group> {
+  const manifestResponse = await fetch(manifestUrl);
+  if (!manifestResponse.ok) throw new Error("Generated head manifest request failed: HTTP " + manifestResponse.status);
+  const manifest = await manifestResponse.json() as GeneratedHeadManifest;
+  if (!manifest.neutral_base_obj || !manifest.blendshapes_json) {
+    throw new Error("Generated head manifest must reference neutral_base_obj and blendshapes_json.");
+  }
+
+  const [objResponse, morphResponse, rigResponse] = await Promise.all([
+    fetch(generatedHeadAssetUrl(manifestUrl, manifest.neutral_base_obj)),
+    fetch(generatedHeadAssetUrl(manifestUrl, manifest.blendshapes_json)),
+    manifest.armature_json
+      ? fetch(generatedHeadAssetUrl(manifestUrl, manifest.armature_json))
+      : Promise.resolve(null),
+  ]);
+  if (!objResponse.ok) throw new Error("Generated head OBJ request failed: HTTP " + objResponse.status);
+  if (!morphResponse.ok) throw new Error("Generated head morph request failed: HTTP " + morphResponse.status);
+  if (rigResponse && !rigResponse.ok) throw new Error("Generated head rig request failed: HTTP " + rigResponse.status);
+
+  const [objText, morphs, rig] = await Promise.all([
+    objResponse.text(),
+    morphResponse.json() as Promise<GeneratedHeadBlendshapes>,
+    rigResponse ? rigResponse.json() as Promise<GeneratedHeadArmature> : Promise.resolve(null),
+  ]);
+  const built = buildGeneratedHeadGeometry(objText, morphs, rig);
+  const group = new THREE.Group();
+  group.name = "AvatarAceNativeGeneratedHead";
+
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xd6aa91,
+    roughness: 0.78,
+    metalness: 0,
+  });
+  const maps = manifest.detail_maps ?? {};
+  const textureLoader = new THREE.TextureLoader();
+  const loadTexture = async (path: string | null | undefined, color: boolean) => {
+    if (!path) return null;
+    const texture = await textureLoader.loadAsync(generatedHeadAssetUrl(manifestUrl, path));
+    if (color) texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  };
+  const [normalMap, displacementMap] = await Promise.all([
+    loadTexture(maps.normal_map, false),
+    loadTexture(maps.displacement_16bit, false),
+  ]);
+  if (normalMap) material.normalMap = normalMap;
+  if (displacementMap) {
+    material.displacementMap = displacementMap;
+    material.displacementScale = 0.001;
+  }
+
+  if (rig) {
+    const { bones, skeleton, root } = buildGeneratedHeadSkeleton(rig);
+    const mesh = new THREE.SkinnedMesh(built.geometry, material);
+    mesh.name = "AvatarAceGeneratedHeadMesh";
+    group.add(root);
+    group.add(mesh);
+    mesh.bind(skeleton);
+    mesh.morphTargetInfluences = morphs.blendshapes
+      ? Object.keys(morphs.blendshapes).map(() => 0)
+      : [];
+    mesh.morphTargetDictionary = Object.fromEntries(
+      Object.keys(morphs.blendshapes).map((name, index) => [name, index]),
+    );
+    mesh.normalizeSkinWeights();
+    root.updateMatrixWorld(true);
+    mesh.updateMatrixWorld(true);
+  } else {
+    const mesh = new THREE.Mesh(built.geometry, material);
+    mesh.name = "AvatarAceGeneratedHeadMesh";
+    mesh.morphTargetInfluences = Object.keys(morphs.blendshapes).map(() => 0);
+    mesh.morphTargetDictionary = Object.fromEntries(
+      Object.keys(morphs.blendshapes).map((name, index) => [name, index]),
+    );
+    group.add(mesh);
+  }
+
+  group.userData.avatarAceGeneratedHead = {
+    manifestUrl,
+    units: morphs.units ?? "unspecified",
+    sourceVertexCount: built.vertexCount,
+    sourceTriangleCount: built.geometry.getAttribute("position").count / 3,
+    morphNames: Object.keys(morphs.blendshapes),
+    hasFacialRig: Boolean(rig),
+  };
+  group.updateMatrixWorld(true);
+  return group;
+}
