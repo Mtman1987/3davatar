@@ -6,6 +6,7 @@ import { ARKIT_BLENDSHAPE_NAMES, PRESETS, type Weights } from "@/lib/avatar/arki
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { animateGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
+import { applyAvatarSkinSurface } from "@/lib/avatar/skin-material";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -338,6 +339,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       map, transparent: true, alphaTest: 0.025, roughness: 0.82, metalness: 0,
       side: THREE.DoubleSide, depthWrite: false,
     });
+    applyAvatarSkinSurface(material);
     const faceMesh = new THREE.Mesh(geometry, material);
     faceMesh.name = "AvatarAcePhotoFace";
     const rootScale = Math.abs(loaded.root.scale.x) || 1;
@@ -418,42 +420,7 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
       const material = source.clone();
       if (!(material instanceof THREE.MeshStandardMaterial)) return material;
       material.color.copy(skinColor);
-      material.roughness = Math.max(material.roughness, 0.72);
-      material.metalness = 0;
-      if (material instanceof THREE.MeshPhysicalMaterial) {
-        material.clearcoat = Math.min(material.clearcoat, 0.08);
-        material.clearcoatRoughness = Math.max(material.clearcoatRoughness, 0.72);
-        material.sheen = Math.max(material.sheen, 0.08);
-        material.sheenRoughness = Math.max(material.sheenRoughness, 0.8);
-      }
-      if (!material.normalMap) {
-        // Low-amplitude pore-scale normal detail, not a painted color texture.
-        const width = 96, height = 96, canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const context = canvas.getContext("2d");
-        if (!context) return material;
-        const image = context.createImageData(width, height);
-        const data = image.data;
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const i = (y * width + x) * 4;
-            const wave = Math.sin(x * 1.73 + Math.sin(y * 0.31) * 2.1) * Math.cos(y * 1.37 + Math.sin(x * 0.23));
-            data[i] = 128 + Math.round(wave * 3);
-            data[i + 1] = 128 + Math.round(Math.cos(x * 0.41 + y * 0.67) * 3);
-            data[i + 2] = 255;
-            data[i + 3] = 255;
-          }
-        }
-        context.putImageData(image, 0, 0);
-        const pores = new THREE.CanvasTexture(canvas);
-        pores.wrapS = THREE.RepeatWrapping;
-        pores.wrapT = THREE.RepeatWrapping;
-        pores.repeat.set(5, 5);
-        pores.needsUpdate = true;
-        material.normalMap = pores;
-        material.normalScale.set(0.025, 0.025);
-      }
+      applyAvatarSkinSurface(material);
       material.userData.avatarSkinSuitMaterial = true;
       return material;
     });
