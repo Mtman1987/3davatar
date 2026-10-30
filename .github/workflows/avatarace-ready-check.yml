@@ -31,6 +31,15 @@ jobs:
           test "$actual" = "$expected" || { echo "::error::Commissioned GLB identity mismatch: $actual"; exit 1; }
           echo "Verified commissioned model SHA-256: $actual"
 
+      - name: Validate Python reconstruction service and pipeline syntax
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile reconstruction service and pipeline
+        run: |
+          python -m compileall -q face-reconstruction-service src scripts/run_pipeline.py
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
