@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { getGeneratedHeadAsset } from "@/lib/avatar/reconstruction";
+import { ARKIT_BLENDSHAPE_NAMES } from "@/lib/avatar/arkit";
 
 export type GeneratedHeadManifest = {
   status?: string;
@@ -276,6 +277,24 @@ export function buildGeneratedHeadSkeleton(
   return { bones, skeleton: new THREE.Skeleton(bones), root };
 }
 
+function registerGeneratedMorphTargets(mesh: THREE.Mesh, names: string[]) {
+  // Three.js builds the name-to-index dictionary from BufferAttribute.name.
+  // Rebuild it after the geometry is assembled instead of maintaining a
+  // parallel hand-written dictionary that can drift from the actual buffers.
+  mesh.updateMorphTargets();
+  const dictionary = mesh.morphTargetDictionary ?? {};
+  const influences = mesh.morphTargetInfluences ?? [];
+  const missing = ARKIT_BLENDSHAPE_NAMES.filter((name) => dictionary[name] === undefined);
+  if (missing.length) {
+    throw new Error("Generated head is missing ARKit morph targets: " + missing.join(", "));
+  }
+  if (influences.length !== names.length || names.length !== 52) {
+    throw new Error("Generated head must register exactly 52 ARKit morph targets; found " + influences.length + ".");
+  }
+  // Keep the authored neutral/captured pose; all live weights are applied by
+  // the viewport after this mesh is attached to the body.
+}
+
 export function generatedHeadAssetUrl(
   manifestUrl: string,
   relativePath: string,
@@ -376,22 +395,14 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     group.add(mesh);
     group.updateMatrixWorld(true);
     mesh.bind(skeleton);
-    mesh.morphTargetInfluences = morphs.blendshapes
-      ? Object.keys(morphs.blendshapes).map(() => 0)
-      : [];
-    mesh.morphTargetDictionary = Object.fromEntries(
-      Object.keys(morphs.blendshapes).map((name, index) => [name, index]),
-    );
+    registerGeneratedMorphTargets(mesh, Object.keys(morphs.blendshapes));
     mesh.normalizeSkinWeights();
     root.updateMatrixWorld(true);
     mesh.updateMatrixWorld(true);
   } else {
     const mesh = new THREE.Mesh(built.geometry, material);
     mesh.name = "AvatarAceGeneratedHeadMesh";
-    mesh.morphTargetInfluences = Object.keys(morphs.blendshapes).map(() => 0);
-    mesh.morphTargetDictionary = Object.fromEntries(
-      Object.keys(morphs.blendshapes).map((name, index) => [name, index]),
-    );
+    registerGeneratedMorphTargets(mesh, Object.keys(morphs.blendshapes));
     group.add(mesh);
   }
 
