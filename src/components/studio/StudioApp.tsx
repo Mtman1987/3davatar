@@ -21,6 +21,7 @@ import { deleteAvatar, getPendingPhoto, listAvatars, saveAvatar, setPendingPhoto
 import { speakLine } from "@/lib/avatar/speak";
 import { getHeadReconstructionStatus, submitHeadReconstruction } from "@/lib/avatar/reconstruction";
 import { scriptWeights, Sound2Face } from "@/lib/avatar/sound2face";
+import { LiveFaceTracker } from "@/lib/avatar/live-face-tracker";
 import { useStudio } from "@/lib/avatar/store";
 import { Viewport, type ViewportHandle } from "@/components/studio/Viewport";
 
@@ -319,6 +320,35 @@ function Studio({
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [morphWeights, setMorphWeights] = useState<Record<string, number>>({});
   const [blinkSpeed, setBlinkSpeed] = useState(0.28);
+  const trackerRef = useRef<LiveFaceTracker | null>(null);
+  const [trackingEnabled, setTrackingEnabled] = useState(false);
+  const [trackingStatus, setTrackingStatus] = useState("");
+
+  useEffect(() => () => { trackerRef.current?.stop(); trackerRef.current = null; }, []);
+
+  async function toggleFaceTracking() {
+    if (trackerRef.current) {
+      trackerRef.current.stop();
+      trackerRef.current = null;
+      setTrackingEnabled(false);
+      setTrackingStatus("");
+      return;
+    }
+    const tracker = new LiveFaceTracker();
+    trackerRef.current = tracker;
+    setTrackingStatus("Requesting camera…");
+    try {
+      await tracker.start();
+      if (trackerRef.current !== tracker) { tracker.stop(); return; }
+      setTrackingEnabled(true);
+      setTrackingStatus("Face tracking on");
+    } catch (error) {
+      tracker.stop();
+      if (trackerRef.current === tracker) trackerRef.current = null;
+      setTrackingEnabled(false);
+      setTrackingStatus(error instanceof Error ? error.message : "Camera unavailable");
+    }
+  }
 
   async function speakAi() {
     const engine = engineRef.current;
@@ -452,7 +482,7 @@ function Studio({
           modelUrl={state.modelUrl}
           modelName={state.modelName}
           generatedHeadUrl={state.generatedHeadUrl}
-          sampleTracking={() => null}
+          sampleTracking={() => trackerRef.current?.sample() ?? null}
           animationIndex={animationIndex}
           animationPlaying={animationPlaying}
           manualMorphs={morphWeights}
