@@ -169,7 +169,14 @@ export function buildGeneratedHeadSkeleton(
     if (!data) throw new Error("Generated head rig is missing joint " + name + ".");
     const bone = new THREE.Bone();
     bone.name = name;
-    bone.position.fromArray(data.position);
+    // Exported joint centers are in mesh/model coordinates (not parent-local).
+    // Convert them to parent-relative offsets when constructing the hierarchy.
+    const parentName = data.parent;
+    const parentPosition = parentName ? armature.joints[parentName]?.position : null;
+    const local = parentPosition
+      ? data.position.map((value, axis) => value - parentPosition[axis])
+      : data.position;
+    bone.position.fromArray(local);
     return bone;
   });
   const byName = new Map(bones.map((bone) => [bone.name, bone]));
