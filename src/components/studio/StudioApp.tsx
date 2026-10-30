@@ -19,6 +19,7 @@ import {
 import { BODY_ASSETS, FINISHED_MODEL_URL, FINISHED_MODEL_NAME, HAIR, OUTFITS, SKINS, VOICES, labelOf, type Panel } from "@/lib/avatar/constants";
 import { deleteAvatar, getPendingPhoto, listAvatars, saveAvatar, setPendingPhoto, type SavedAvatar } from "@/lib/avatar/gallery";
 import { speakLine } from "@/lib/avatar/speak";
+import { getHeadReconstructionStatus, submitHeadReconstruction } from "@/lib/avatar/reconstruction";
 import { scriptWeights, Sound2Face } from "@/lib/avatar/sound2face";
 import { useStudio } from "@/lib/avatar/store";
 import { Viewport, type ViewportHandle } from "@/components/studio/Viewport";
@@ -62,6 +63,30 @@ export function StudioApp() {
     try {
       const { prepareAndDetect } = await import("@/lib/avatar/detect");
       const preview = await prepareAndDetect(file, (statusText) => patch({ statusText }));
+      patch({ statusText: "Sending photo to the 3D head generator…" });
+
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      const fileName = file instanceof File && file.name ? file.name : "portrait.jpg";
+      const mimeType = file.type === "image/png" || file.type === "image/webp" ? file.type : "image/jpeg";
+      const job = await submitHeadReconstruction({
+        data: { fileName, mimeType, bytesBase64: btoa(binary) },
+      });
+      patch({ statusText: "Reconstructing your individual 3D head…" });
+
+      let result = job;
+      const deadline = Date.now() + 30 * 60 * 1000;
+      while (result.status !== "complete" && result.status !== "failed") {
+        if (Date.now() > deadline) throw new Error("Head reconstruction timed out. Please try again.");
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        result = await getHeadReconstructionStatus({ data: { jobId: job.id } });
+      }
+      if (result.status !== "complete") throw new Error(result.message || "The head generator could not complete this photo.");
+
       const state = useStudio.getState();
       patch({
         status: "ready",
@@ -69,6 +94,7 @@ export function StudioApp() {
         hasFace: true,
         faceRev: state.faceRev + 1,
         photoPreview: preview,
+        generatedHeadUrl: "https://avatarace.invalid/v1/reconstructions/" + job.id + "/assets/avatarace_head_manifest.json",
         error: null,
       });
     } catch (error) {
@@ -78,7 +104,7 @@ export function StudioApp() {
         statusText: "",
         error: missing
           ? "We could not find a face in that photo. Try another one, looking straight at the camera."
-          : "Face detection didn't start. Please try again.",
+          : error instanceof Error ? error.message : "Photo-to-head generation failed. Please try again.",
       });
     }
   }
