@@ -228,6 +228,12 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       // the neck chain's bind pose.
       const anchorWorldQuaternion = anchorBone.getWorldQuaternion(new THREE.Quaternion());
       attachment.quaternion.copy(anchorWorldQuaternion.invert());
+      // Start the generated head lower than the lowest neck joint so its
+      // neck base overlaps the body's neck instead of hovering above it.
+      // The studio sliders are applied here too (the legacy photo-face path
+      // already consumed them, but the native generated-head path did not).
+      attachment.scale.setScalar(props.headScale);
+      attachment.position.set(0, -0.06 + props.headY, props.headZ);
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
@@ -257,7 +263,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       }
       if (reconstructedHeadRef.current === attachment) reconstructedHeadRef.current = null;
     };
-  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, booted]);
+  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, props.headScale, props.headY, props.headZ, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
