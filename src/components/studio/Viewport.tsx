@@ -541,14 +541,21 @@ function findExactHeadBone(root: THREE.Object3D): THREE.Bone | null {
 }
 
 function findNeckBone(root: THREE.Object3D): THREE.Bone | null {
-  let exact: THREE.Bone | null = null;
+  // The standardized bodies use a multi-bone neck chain (neck01, neck02,
+  // neck03). The generated bundle's neck joint is at the base of its neck,
+  // so attach to the lowest neck-chain joint, not the upper neck/head joint.
+  root.updateMatrixWorld(true);
+  const candidates: Array<{ bone: THREE.Bone; worldY: number }> = [];
   root.traverse((object) => {
     const bone = object as THREE.Bone;
     if (!bone.isBone) return;
-    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
-    if (/^(neck|neck1|mixamorigneck|neckjoint)$/.test(name)) exact = bone;
+    const name = bone.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!/^(?:mixamorig)?neck(?:\d+)?$/.test(name) && name !== "neckjoint") return;
+    const world = bone.getWorldPosition(new THREE.Vector3());
+    candidates.push({ bone, worldY: world.y });
   });
-  return exact;
+  candidates.sort((a, b) => a.worldY - b.worldY);
+  return candidates[0]?.bone ?? null;
 }
 
 function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
