@@ -135,7 +135,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             if output_lines:
                 _jobs[job_id]["message"] = output_lines[-1][-500:]
         if process.returncode != 0:
-            raise RuntimeError("Pipeline exited with code " + str(process.returncode) + ". Last output:\\n" + (output or "")[-6000:])
+            raise RuntimeError("Pipeline exited with code " + str(process.returncode) + ". Last output:\n" + (output or "")[-6000:])
         import json
         stage5_path = output_dir / "stage5_export_manifest.json"
         if not stage5_path.is_file():
@@ -201,7 +201,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             log_path = Path(job.get("log_path", output_dir.parent / "pipeline.log"))
             try:
                 with log_path.open("a", encoding="utf-8") as log:
-                    log.write("\\n[AvatarAce service error] " + repr(exc) + "\\n")
+                    log.write("\n[AvatarAce service error] " + repr(exc) + "\n")
             except OSError:
                 pass
             job.update(status="failed", message=str(exc)[:6000])
