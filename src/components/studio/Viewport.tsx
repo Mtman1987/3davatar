@@ -650,38 +650,49 @@ function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
 }
 
 function autonomousCohostWeights(time: number): Record<string, number> {
-  // Slow, restrained micro-expressions: attentive gaze, occasional curiosity,
-  // and a faint friendly expression. Blink timing remains handled by the
-  // fitted eyelids so it works even when the mesh has no morph targets.
+  // A small repertoire of coordinated, low-intensity social expressions.
+  // Each state eases in and out over several seconds; the face never jumps
+  // between poses. Speech weights are layered after this function, so audio
+  // always has final control of the mouth while the eyes and brows keep acting.
   const smoothPulse = (t: number, period: number, width = 0.34) => {
     const phase = ((t % period) + period) % period / period;
     const distance = Math.min(phase, 1 - phase);
     const x = clamp(1 - distance / width, 0, 1);
     return x * x * (3 - 2 * x);
   };
-  const curious = smoothPulse(time + 2.1, 13.5, 0.22);
-  const attentive = smoothPulse(time + 5.4, 9.2, 0.2);
-  const gaze = Math.sin(time * 0.31) * 0.5 + Math.sin(time * 0.13 + 1.7) * 0.22;
-  const verticalGaze = Math.sin(time * 0.19 + 0.8) * 0.18;
-  const friendly = 0.055 + smoothPulse(time + 8.3, 17, 0.18) * 0.075;
+  const attentive = smoothPulse(time + 4.8, 12.5, 0.24);
+  const curious = smoothPulse(time + 1.7, 19, 0.19);
+  const warm = smoothPulse(time + 9.2, 23, 0.2);
+  const thoughtful = smoothPulse(time + 14.1, 27, 0.17);
+  const gaze = Math.sin(time * 0.27) * 0.42 + Math.sin(time * 0.105 + 1.4) * 0.16;
+  const verticalGaze = Math.sin(time * 0.16 + 0.7) * 0.13;
+  const smile = 0.025 + warm * 0.105 + attentive * 0.018;
+  const browLift = 0.018 + curious * 0.16 + attentive * 0.055;
+  const eyeOpen = 0.018 + attentive * 0.055 + curious * 0.075;
   return {
-    eyeLookOutLeft: clamp(gaze, 0, 0.24),
-    eyeLookInLeft: clamp(-gaze, 0, 0.24),
-    eyeLookInRight: clamp(gaze, 0, 0.24),
-    eyeLookOutRight: clamp(-gaze, 0, 0.24),
-    eyeLookUpLeft: clamp(verticalGaze, 0, 0.16),
-    eyeLookUpRight: clamp(verticalGaze, 0, 0.16),
-    eyeLookDownLeft: clamp(-verticalGaze, 0, 0.12),
-    eyeLookDownRight: clamp(-verticalGaze, 0, 0.12),
-    eyeWideLeft: 0.025 + attentive * 0.075 + curious * 0.12,
-    eyeWideRight: 0.025 + attentive * 0.075 + curious * 0.12,
-    browInnerUp: 0.025 + curious * 0.19 + attentive * 0.045,
-    browOuterUpLeft: 0.018 + curious * 0.09,
-    browOuterUpRight: 0.018 + curious * 0.09,
-    mouthSmileLeft: friendly,
-    mouthSmileRight: friendly,
-    cheekSquintLeft: friendly * 0.28,
-    cheekSquintRight: friendly * 0.28,
+    eyeLookOutLeft: clamp(gaze, 0, 0.22),
+    eyeLookInLeft: clamp(-gaze, 0, 0.22),
+    eyeLookInRight: clamp(gaze, 0, 0.22),
+    eyeLookOutRight: clamp(-gaze, 0, 0.22),
+    eyeLookUpLeft: clamp(verticalGaze + thoughtful * 0.035, 0, 0.15),
+    eyeLookUpRight: clamp(verticalGaze + thoughtful * 0.035, 0, 0.15),
+    eyeLookDownLeft: clamp(-verticalGaze + thoughtful * 0.025, 0, 0.11),
+    eyeLookDownRight: clamp(-verticalGaze + thoughtful * 0.025, 0, 0.11),
+    eyeWideLeft: eyeOpen,
+    eyeWideRight: eyeOpen,
+    eyeSquintLeft: warm * 0.055,
+    eyeSquintRight: warm * 0.055,
+    browInnerUp: browLift + thoughtful * 0.025,
+    browOuterUpLeft: 0.012 + curious * 0.075 + attentive * 0.018,
+    browOuterUpRight: 0.012 + curious * 0.075 + attentive * 0.018,
+    browDownLeft: thoughtful * 0.035,
+    browDownRight: thoughtful * 0.035,
+    mouthSmileLeft: smile,
+    mouthSmileRight: smile,
+    mouthDimpleLeft: warm * 0.035,
+    mouthDimpleRight: warm * 0.035,
+    cheekSquintLeft: warm * 0.045 + smile * 0.22,
+    cheekSquintRight: warm * 0.045 + smile * 0.22,
   };
 }
 
