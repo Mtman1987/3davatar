@@ -91,7 +91,8 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
     const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 16), skin.clone());
     mesh.name = "AvatarAce" + (upper ? "Upper" : "Lower") + "BlinkLid_" + side;
     mesh.geometry.translate(0, -center.y, 0);
-    mesh.position.set(0, center.y, lidDepth + frontSign * radius * 0.18);
+    // The globe front surface reaches roughly lidDepth + 0.38 * radius. Keep the fitted lid patch just in front of it so the open lids remain visible and can slide over the eye during a blink.
+    mesh.position.set(0, center.y, lidDepth + frontSign * radius * 0.52);
     mesh.scale.y = 0.001;
     mesh.renderOrder = 5;
     eye.add(mesh);
@@ -284,8 +285,11 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     cavity.scale.set(1 + smile * 0.2 - round * 0.28, opening * (1 - smile * 0.32), 1);
     cavity.position.y = smile * cavityWidth * 0.025;
   }
-  const jawDrop = jaw * Math.max(neutralGap * 5, 0.012);
-  for (const tooth of upperTeeth ?? []) tooth.position.y = neutralGap * 0.42 + toothHeight * 0.5 + smile * cavityWidth * 0.025;
+  const jawDrop = jaw * Math.max(neutralGap * 5, cavityWidth * 0.16, 0.012);
+  // Keep the upper row anchored to the upper jaw and move the lower row with
+  // the opening jaw. A small upper lift prevents the two rows reading as one
+  // fixed white strip at the start of a speech shape.
+  for (const tooth of upperTeeth ?? []) tooth.position.y = neutralGap * 0.42 + toothHeight * 0.5 + smile * cavityWidth * 0.025 + jawDrop * 0.12;
   for (const tooth of lowerTeeth ?? []) tooth.position.y = -neutralGap * 0.42 - toothHeight * 0.5 - jawDrop;
   if (tongue) {
     tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
