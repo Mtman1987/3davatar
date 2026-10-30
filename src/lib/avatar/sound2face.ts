@@ -185,12 +185,15 @@ export function weightsFromSpectrum(
     mouthLowerDownRight: open * 0.72,
     mouthFunnel: rounded * 0.55,
     mouthPucker: clamp(rounded - spread * 0.4) * 0.45,
-    mouthSmileLeft: spread * 0.4,
-    mouthSmileRight: spread * 0.4,
-    mouthStretchLeft: spread * 0.26,
-    mouthStretchRight: spread * 0.26,
-    cheekSquintLeft: spread * 0.18,
-    cheekSquintRight: spread * 0.18,
+    // Speech energy must not be interpreted as happiness. Reserve smile
+    // coefficients for expression tracking/presets; use stretch/funnel for
+    // broad acoustic articulation instead.
+    mouthStretchLeft: spread * 0.42,
+    mouthStretchRight: spread * 0.42,
+    mouthUpperUpLeft: mid * 0.18,
+    mouthUpperUpRight: mid * 0.18,
+    cheekSquintLeft: spread * 0.08,
+    cheekSquintRight: spread * 0.08,
     mouthClose: clamp(0.25 - open),
     browInnerUp: energy * 0.12,
   };
@@ -207,8 +210,8 @@ export function scriptWeights(t: number): Weights {
     mouthLowerDownRight: open * 0.72,
     mouthFunnel: open * round * 0.5,
     mouthPucker: open * round * 0.28,
-    mouthSmileLeft: open * (1 - round) * 0.32,
-    mouthSmileRight: open * (1 - round) * 0.32,
+    mouthStretchLeft: open * (1 - round) * 0.24,
+    mouthStretchRight: open * (1 - round) * 0.24,
   };
 }
 
