@@ -122,6 +122,7 @@ export function buildGeneratedFacialAnatomy(
   mouth.userData.lowerTeeth = lowerTeeth;
   mouth.userData.tongue = tongue;
   mouth.userData.neutralGap = neutralGap;
+  mouth.userData.toothHeight = toothHeight;
   root.add(mouth);
   root.userData.avatarAceAnatomy = { eyes: root.children.slice(0, 2), mouth };
   return root;
@@ -151,9 +152,10 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   const lowerTeeth = mouth.userData.lowerTeeth as THREE.Mesh[] | undefined;
   const tongue = mouth.userData.tongue as THREE.Mesh | undefined;
   const neutralGap = Number(mouth.userData.neutralGap ?? 0.0015);
+  const toothHeight = Number(mouth.userData.toothHeight ?? 0.0015);
   const opening = 1 + jaw * 7;
   if (cavity) cavity.scale.y = opening;
   const jawDrop = jaw * Math.max(neutralGap * 5, 0.012);
-  for (const tooth of lowerTeeth ?? []) tooth.position.y = -neutralGap * 0.42 - tooth.geometry.parameters.height * 0.5 - jawDrop;
+  for (const tooth of lowerTeeth ?? []) tooth.position.y = -neutralGap * 0.42 - toothHeight * 0.5 - jawDrop;
   if (tongue) tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
 }
