@@ -84,8 +84,12 @@ export function StudioApp() {
         if (Date.now() > deadline) throw new Error("Head reconstruction timed out. Please try again.");
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
         result = await getHeadReconstructionStatus({ data: { jobId: job.id } });
+        if (result.message) patch({ statusText: result.message.slice(0, 180) });
       }
-      if (result.status !== "complete") throw new Error(result.message || "The head generator could not complete this photo.");
+      if (result.status !== "complete") {
+        const diagnostics = result.logs?.slice(-12).join("\n");
+        throw new Error([result.message || "The head generator could not complete this photo.", diagnostics].filter(Boolean).join("\n\n"));
+      }
 
       const state = useStudio.getState();
       patch({

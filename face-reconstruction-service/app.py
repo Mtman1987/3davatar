@@ -87,7 +87,7 @@ async def create_reconstruction(
         raise
 
     with _lock:
-        _jobs[job_id] = {"status": "queued", "message": "Photos accepted", "directory": str(job_dir)}
+        _jobs[job_id] = {"status": "queued", "message": "Photos accepted", "directory": str(job_dir), "log_path": str(job_dir / "pipeline.log"), "logs": []}
 
     threading.Thread(
         target=run_pipeline,
@@ -111,12 +111,31 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             "--config", str(PIPELINE_ROOT / "configs" / "default.yaml"),
             "--detail", os.environ.get("FACE_RECONSTRUCTION_DETAIL", "0"),
         ]
-        completed = subprocess.run(
-            command, cwd=PIPELINE_ROOT, env=env, capture_output=True,
-            text=True, timeout=1800, check=False,
-        )
-        if completed.returncode != 0:
-            raise RuntimeError((completed.stderr or completed.stdout)[-6000:])
+        log_path = Path(_jobs[job_id]["log_path"])
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w", encoding="utf-8", errors="replace") as log:
+            process = subprocess.Popen(
+                command, cwd=PIPELINE_ROOT, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True,
+            )
+            try:
+                output, _ = process.communicate(timeout=1800)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                output, _ = process.communicate()
+                log.write(output or "")
+                log.flush()
+                raise RuntimeError("Pipeline exceeded the 30-minute execution limit.")
+            log.write(output or "")
+            log.flush()
+        output_lines = [line[-1000:] for line in (output or "").splitlines() if line.strip()]
+        with _lock:
+            _jobs[job_id]["logs"] = output_lines[-80:]
+            if output_lines:
+                _jobs[job_id]["message"] = output_lines[-1][-500:]
+        if process.returncode != 0:
+            raise RuntimeError("Pipeline exited with code " + str(process.returncode) + ". Last output:\n" + (output or "")[-6000:])
         import json
         stage5_path = output_dir / "stage5_export_manifest.json"
         if not stage5_path.is_file():
@@ -178,17 +197,25 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             _jobs[job_id].update(status="complete", message="Native head geometry, ARKit morphs, rig, and texture assets exported")
     except Exception as exc:
         with _lock:
-            _jobs[job_id].update(status="failed", message=str(exc)[:6000])
+            job = _jobs.get(job_id, {})
+            log_path = Path(job.get("log_path", output_dir.parent / "pipeline.log"))
+            try:
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write("\n[AvatarAce service error] " + repr(exc) + "\n")
+            except OSError:
+                pass
+            job.update(status="failed", message=str(exc)[:6000])
+            _jobs[job_id] = job
 
 
 @app.get("/v1/reconstructions/{job_id}")
-def get_reconstruction(job_id: str, x_face_reconstruction_token: str | None = Header(default=None)) -> dict[str, str]:
+def get_reconstruction(job_id: str, x_face_reconstruction_token: str | None = Header(default=None)) -> dict[str, Any]:
     authorize(x_face_reconstruction_token)
     with _lock:
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(404, "Reconstruction job not found")
-        return {"id": job_id, "status": job["status"], "message": job["message"]}
+        return {"id": job_id, "status": job["status"], "message": job["message"], "logs": job.get("logs", [])}
 
 
 @app.get("/v1/reconstructions/{job_id}/assets/{asset_name}")
