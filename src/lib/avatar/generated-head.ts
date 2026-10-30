@@ -247,10 +247,15 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     if (color) texture.colorSpace = THREE.SRGBColorSpace;
     return texture;
   };
-  const [normalMap, displacementMap] = await Promise.all([
-    loadTexture(maps.normal_map, false),
-    loadTexture(maps.displacement_16bit, false),
+  const albedoPath = maps.albedo ?? maps.albedo_map ?? maps.albedo_texture ?? maps.projected_texture;
+  const normalPath = maps.normal_map ?? maps.normal ?? maps.film_normal;
+  const displacementPath = maps.displacement_16bit ?? maps.displacement_png ?? maps.displacement;
+  const [albedoMap, normalMap, displacementMap] = await Promise.all([
+    loadTexture(albedoPath, true),
+    loadTexture(normalPath, false),
+    loadTexture(displacementPath, false),
   ]);
+  if (albedoMap) material.map = albedoMap;
   if (normalMap) material.normalMap = normalMap;
   if (displacementMap) {
     material.displacementMap = displacementMap;
