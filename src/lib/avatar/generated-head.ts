@@ -208,7 +208,7 @@ export function generatedHeadAssetUrl(
 
 async function fetchHeadAsset(url: string): Promise<Response> {
   const parsed = new URL(url);
-  const match = parsed.pathname.match(/\\/v1\\/reconstructions\\/([a-f0-9]{32})\\/assets\\/([a-zA-Z0-9_.-]+)$/);
+  const match = parsed.pathname.match(/\/v1\/reconstructions\/([a-f0-9]{32})\/assets\/([a-zA-Z0-9_.-]+)$/);
   if (!match) throw new Error("Invalid generated-head asset URL.");
   const result = await getGeneratedHeadAsset({ data: { jobId: match[1], assetName: match[2] } });
   const raw = atob(result.bytesBase64);
