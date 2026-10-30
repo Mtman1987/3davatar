@@ -470,6 +470,7 @@ function Studio({
           headScale={state.headScale}
           headY={state.headY}
           headZ={state.headZ}
+          eyeDepth={state.eyeDepth}
           expression={state.expression}
           faceRev={state.faceRev}
           blinkSpeed={blinkSpeed}
@@ -711,6 +712,7 @@ function FacePanel({ onCamera, onLibrary, onSample, blinkSpeed, onBlinkSpeedChan
       <Slider label="Head size" min={0.8} max={1.35} step={0.01} value={state.headScale} onChange={(headScale) => state.patch({ headScale })} />
       <Slider label="Height" min={-0.06} max={0.08} step={0.005} value={state.headY} onChange={(headY) => state.patch({ headY })} />
       <Slider label="Depth" min={-0.04} max={0.1} step={0.005} value={state.headZ} onChange={(headZ) => state.patch({ headZ })} />
+      <Slider label="Eye depth (in / out)" min={-0.04} max={0.04} step={0.001} value={state.eyeDepth} onChange={(eyeDepth) => state.patch({ eyeDepth })} />
       <Slider label="Expression" min={0} max={1.4} step={0.01} value={state.expression} onChange={(expression) => state.patch({ expression })} />
       <Slider label="Blink speed" min={0.08} max={0.8} step={0.01} value={blinkSpeed} onChange={onBlinkSpeedChange} />
     </div>
