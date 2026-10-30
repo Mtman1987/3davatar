@@ -13,7 +13,7 @@ function point(points: [number, number, number][], index: number): THREE.Vector3
   return new THREE.Vector3(value[0], value[1], value[2]);
 }
 
-function makeEye(points: [number, number, number][], centerIndex: number, ring: number[], skin: THREE.Material, side: string) {
+function makeEye(points: [number, number, number][], centerIndex: number, ring: number[], skin: THREE.Material, side: string, frontSign: number) {
   const eye = new THREE.Group();
   eye.name = "AvatarAceEye_" + side;
   const contour = ring.map((index) => point(points, index));
@@ -26,7 +26,8 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
     new THREE.MeshStandardMaterial({ color: 0xf4eee5, roughness: 0.28 }),
   );
   eyeball.name = "AvatarAceEyeball_" + side;
-  eyeball.position.set(center.x, center.y, center.z + radius * 0.32);
+  const lidDepth = contour.reduce((sum, p) => sum + p.z, 0) / contour.length;
+  eyeball.position.set(center.x, center.y, center.z + frontSign * radius * 0.12);
   eyeball.scale.set(1, Math.max(0.62, height / Math.max(width, 0.001)), 0.72);
   eye.add(eyeball);
 
@@ -52,8 +53,8 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
     const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 16), skin.clone());
     mesh.name = "AvatarAce" + (upper ? "Upper" : "Lower") + "BlinkLid_" + side;
     mesh.geometry.translate(0, -center.y, 0);
-    mesh.position.set(0, center.y, center.z + radius * 1.08);
-    mesh.scale.y = 0.015;
+    mesh.position.set(0, center.y, lidDepth + frontSign * radius * 0.18);
+    mesh.scale.y = 0.001;
     mesh.renderOrder = 5;
     eye.add(mesh);
     return mesh;
@@ -72,11 +73,17 @@ export function buildGeneratedFacialAnatomy(
 ): THREE.Group | null {
   if (!landmarks || landmarks.points.length < 478) return null;
   const points = landmarks.points;
+  // MediaPipe/FLAME exports can use either Z convention. Determine the
+  // subject's outward-facing direction from the nose tip relative to the eyes
+  // instead of assuming positive Z is always toward the camera.
+  const eyeDepth = (point(points, 468).z + point(points, 473).z) * 0.5;
+  const noseDepth = point(points, 1).z;
+  const frontSign = Math.sign(noseDepth - eyeDepth) || 1;
   const root = new THREE.Group();
   root.name = "AvatarAceProceduralFacialAnatomy";
   const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.8, side: THREE.DoubleSide });
-  root.add(makeEye(points, 468, EYE_RINGS[0], skin, "Left"));
-  root.add(makeEye(points, 473, EYE_RINGS[1], skin, "Right"));
+  root.add(makeEye(points, 468, EYE_RINGS[0], skin, "Left", frontSign));
+  root.add(makeEye(points, 473, EYE_RINGS[1], skin, "Right", frontSign));
 
   const lipPoints = INNER_LIPS.map((index) => point(points, index));
   const mouthCenter = lipPoints.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / lipPoints.length);
@@ -98,7 +105,12 @@ export function buildGeneratedFacialAnatomy(
     new THREE.MeshStandardMaterial({ color: 0x35151a, roughness: 0.95, side: THREE.DoubleSide }),
   );
   cavity.name = "AvatarAceMouthCavity";
-  cavity.position.z = Math.max(...lipPoints.map((p) => p.z)) + 0.009 - mouthCenter.z;
+  const frontLipDepth = lipPoints.reduce(
+    (front, p) => p.z * frontSign > front * frontSign ? p.z : front,
+    lipPoints[0].z,
+  );
+  const detailDepth = Math.max(mouthWidth * 0.018, 0.0006);
+  cavity.position.z = frontLipDepth + frontSign * detailDepth - mouthCenter.z;
   mouth.add(cavity);
 
   const toothMaterial = new THREE.MeshStandardMaterial({ color: 0xf4eee1, roughness: 0.24 });
@@ -110,13 +122,13 @@ export function buildGeneratedFacialAnatomy(
     const x = (i - 2.5) * toothWidth * 0.91;
     const upper = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, toothHeight, mouthWidth * 0.045), toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
-    upper.position.set(x, neutralGap * 0.42 + toothHeight * 0.5, cavity.position.z + 0.012);
+    upper.position.set(x, neutralGap * 0.42 + toothHeight * 0.5, cavity.position.z + frontSign * detailDepth * 0.55);
     mouth.add(upper);
     upperTeeth.push(upper);
 
     const lower = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, toothHeight, mouthWidth * 0.045), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
-    lower.position.set(x, -neutralGap * 0.42 - toothHeight * 0.5, cavity.position.z + 0.012);
+    lower.position.set(x, -neutralGap * 0.42 - toothHeight * 0.5, cavity.position.z + frontSign * detailDepth * 0.55);
     mouth.add(lower);
     lowerTeeth.push(lower);
   }
@@ -127,7 +139,7 @@ export function buildGeneratedFacialAnatomy(
   );
   tongue.name = "AvatarAceTongue";
   tongue.scale.set(1.25, 0.32, 0.34);
-  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z + 0.016);
+  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z + frontSign * detailDepth * 0.7);
   mouth.add(tongue);
 
   // Small fitted mouth-corner anchors make a smile visibly lift and widen the
@@ -138,7 +150,7 @@ export function buildGeneratedFacialAnatomy(
       skin.clone(),
     );
     corner.name = side < 0 ? "AvatarAceMouthCornerLeft" : "AvatarAceMouthCornerRight";
-    corner.position.set(side * cavityWidth * 0.48, 0, cavity.position.z + 0.006);
+    corner.position.set(side * cavityWidth * 0.48, 0, cavity.position.z + frontSign * detailDepth * 0.45);
     corner.scale.set(1, 0.72, 0.42);
     mouth.add(corner);
     return corner;
@@ -156,7 +168,7 @@ export function buildGeneratedFacialAnatomy(
   mouth.userData.neutralGap = neutralGap;
   mouth.userData.toothHeight = toothHeight;
   root.add(mouth);
-  root.userData.avatarAceAnatomy = { eyes: root.children.slice(0, 2), mouth };
+  root.userData.avatarAceAnatomy = { eyes: root.children.slice(0, 2), mouth, frontSign };
   return root;
 }
 
@@ -183,8 +195,10 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     const next = THREE.MathUtils.damp(current, target, 28, Math.max(0, delta));
     upperLid.userData.blink = next;
     lowerLid.userData.blink = next;
-    upperLid.scale.y = 0.015 + next * 0.985;
-    lowerLid.scale.y = 0.015 + next * 0.985;
+    // Near-zero scale is the open resting pose; both fitted lid halves meet
+    // only when the blink weight approaches one.
+    upperLid.scale.y = 0.001 + next * 0.999;
+    lowerLid.scale.y = 0.001 + next * 0.999;
   }
   const jaw = THREE.MathUtils.clamp(
     Math.max(weights.jawOpen ?? 0, weights.mouthOpen ?? 0, weights.viseme_aa ?? 0),
