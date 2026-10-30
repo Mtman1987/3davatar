@@ -117,6 +117,14 @@ function parseIndex(raw: string, length: number): number {
   return index;
 }
 
+function getMorphDeltaScale(units?: string): number {
+  const normalized = (units ?? "meters").trim().toLowerCase();
+  if (["m", "meter", "meters"].includes(normalized)) return 1;
+  if (["mm", "millimeter", "millimeters"].includes(normalized)) return 0.001;
+  if (["cm", "centimeter", "centimeters"].includes(normalized)) return 0.01;
+  throw new Error("Unsupported generated-head morph units: " + normalized);
+}
+
 /**
  * Parses the Stage5 triangular OBJ without losing its independent position/UV
  * indices. Every output corner retains its source vertex index so morph and
@@ -185,6 +193,7 @@ export function buildGeneratedHeadGeometry(
   }
 
   const morphNames = Object.keys(blendshapeData.blendshapes);
+  const morphDeltaScale = getMorphDeltaScale(blendshapeData.units);
   geometry.morphAttributes.position = morphNames.map((name) => {
     const deltas = blendshapeData.blendshapes[name];
     if (!Array.isArray(deltas) || deltas.length !== vertices.length) {
@@ -193,10 +202,12 @@ export function buildGeneratedHeadGeometry(
     const expanded = new Float32Array(corners.length * 3);
     corners.forEach((corner, i) => {
       const delta = deltas[corner.vertex];
-      if (!delta || delta.length < 3) throw new Error("Invalid vertex delta in morph " + name + ".");
-      expanded[i * 3] = delta[0];
-      expanded[i * 3 + 1] = delta[1];
-      expanded[i * 3 + 2] = delta[2];
+      if (!Array.isArray(delta) || delta.length !== 3 || !delta.every(Number.isFinite)) {
+        throw new Error("Invalid vertex delta in morph " + name + " at vertex " + corner.vertex + ".");
+      }
+      expanded[i * 3] = delta[0] * morphDeltaScale;
+      expanded[i * 3 + 1] = delta[1] * morphDeltaScale;
+      expanded[i * 3 + 2] = delta[2] * morphDeltaScale;
     });
     const attribute = new THREE.BufferAttribute(expanded, 3);
     attribute.name = name;
