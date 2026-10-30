@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getGeneratedHeadAsset } from "@/lib/avatar/reconstruction";
 
 export type GeneratedHeadManifest = {
   status?: string;
@@ -205,9 +206,20 @@ export function generatedHeadAssetUrl(
 }
 
 
+async function fetchHeadAsset(url: string): Promise<Response> {
+  const parsed = new URL(url);
+  const match = parsed.pathname.match(/\\/v1\\/reconstructions\\/([a-f0-9]{32})\\/assets\\/([a-zA-Z0-9_.-]+)$/);
+  if (!match) throw new Error("Invalid generated-head asset URL.");
+  const result = await getGeneratedHeadAsset({ data: { jobId: match[1], assetName: match[2] } });
+  const raw = atob(result.bytesBase64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Response(bytes, { headers: { "Content-Type": result.contentType } });
+}
+
 /** Fetch and assemble the Stage5 manifest plus its native companion assets. */
 export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THREE.Group> {
-  const manifestResponse = await fetch(manifestUrl);
+  const manifestResponse = await fetchHeadAsset(manifestUrl);
   if (!manifestResponse.ok) throw new Error("Generated head manifest request failed: HTTP " + manifestResponse.status);
   const manifest = await manifestResponse.json() as GeneratedHeadManifest;
   if (!manifest.neutral_base_obj || !manifest.blendshapes_json) {
@@ -215,10 +227,10 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   }
 
   const [objResponse, morphResponse, rigResponse] = await Promise.all([
-    fetch(generatedHeadAssetUrl(manifestUrl, manifest.neutral_base_obj)),
-    fetch(generatedHeadAssetUrl(manifestUrl, manifest.blendshapes_json)),
+    fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.neutral_base_obj)),
+    fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.blendshapes_json)),
     manifest.armature_json
-      ? fetch(generatedHeadAssetUrl(manifestUrl, manifest.armature_json))
+      ? fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.armature_json))
       : Promise.resolve(null),
   ]);
   if (!objResponse.ok) throw new Error("Generated head OBJ request failed: HTTP " + objResponse.status);
@@ -243,9 +255,16 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   const textureLoader = new THREE.TextureLoader();
   const loadTexture = async (path: string | null | undefined, color: boolean) => {
     if (!path) return null;
-    const texture = await textureLoader.loadAsync(generatedHeadAssetUrl(manifestUrl, path));
-    if (color) texture.colorSpace = THREE.SRGBColorSpace;
-    return texture;
+    const response = await fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, path));
+    if (!response.ok) throw new Error("Generated head texture request failed: HTTP " + response.status);
+    const objectUrl = URL.createObjectURL(await response.blob());
+    try {
+      const texture = await textureLoader.loadAsync(objectUrl);
+      if (color) texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   };
   const albedoPath = maps.albedo ?? maps.albedo_map ?? maps.albedo_texture ?? maps.projected_texture;
   const normalPath = maps.normal_map ?? maps.normal ?? maps.film_normal;
@@ -287,6 +306,11 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
       Object.keys(morphs.blendshapes).map((name, index) => [name, index]),
     );
     group.add(mesh);
+  }
+
+  const neckPosition = rig?.joints?.neck?.position;
+  if (Array.isArray(neckPosition) && neckPosition.length >= 3) {
+    group.position.set(-neckPosition[0], -neckPosition[1], -neckPosition[2]);
   }
 
   group.userData.avatarAceGeneratedHead = {
