@@ -32,6 +32,73 @@ export type GeneratedHeadArmature = {
   skinning_weights: number[][];
 };
 
+
+/**
+ * Match the generated head's average diffuse skin color to the same sampled
+ * photo tone used by the body, while retaining the albedo map's local detail.
+ * The correction is an albedo multiplier, not a lighting change.
+ */
+export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THREE.Color | null): void {
+  if (!targetTone) return;
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const source of materials) {
+      const material = source as THREE.MeshStandardMaterial;
+      if (!material || !("color" in material) || !material.color?.isColor) continue;
+      const averageTexture = new THREE.Color(1, 1, 1);
+      const map = material.map;
+      let sampledMap = false;
+      if (map?.image) {
+        try {
+          const image = map.image as CanvasImageSource & { width?: number; height?: number };
+          const canvas = document.createElement("canvas");
+          canvas.width = 32;
+          canvas.height = 32;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (context) {
+            context.drawImage(image, 0, 0, 32, 32);
+            const pixels = context.getImageData(0, 0, 32, 32).data;
+            let red = 0, green = 0, blue = 0, count = 0;
+            for (let y = 3; y < 29; y++) {
+              for (let x = 3; x < 29; x++) {
+                const index = (y * 32 + x) * 4;
+                const r = pixels[index]!, g = pixels[index + 1]!, b = pixels[index + 2]!;
+                const maximum = Math.max(r, g, b), minimum = Math.min(r, g, b);
+                if (pixels[index + 3]! < 200 || maximum < 35 || maximum - minimum > 125) continue;
+                red += r; green += g; blue += b; count++;
+              }
+            }
+            if (count > 20) {
+              averageTexture.setRGB(red / count / 255, green / count / 255, blue / count / 255, THREE.SRGBColorSpace);
+              sampledMap = true;
+            }
+          }
+        } catch {
+          // Tainted or unsupported image sources fall back to a direct tone tint.
+        }
+      }
+      if (!sampledMap) {
+        material.color.copy(targetTone);
+      } else {
+        const effectiveAverage = averageTexture.multiply(material.color);
+        const correction = new THREE.Color(
+          targetTone.r / Math.max(effectiveAverage.r, 0.025),
+          targetTone.g / Math.max(effectiveAverage.g, 0.025),
+          targetTone.b / Math.max(effectiveAverage.b, 0.025),
+        );
+        material.color.multiply(new THREE.Color(
+          THREE.MathUtils.clamp(correction.r, 0.35, 3.5),
+          THREE.MathUtils.clamp(correction.g, 0.35, 3.5),
+          THREE.MathUtils.clamp(correction.b, 0.35, 3.5),
+        ));
+      }
+      material.needsUpdate = true;
+    }
+  });
+}
+
 export type GeneratedHeadGeometry = {
   geometry: THREE.BufferGeometry;
   originalVertexIndices: Uint32Array;
