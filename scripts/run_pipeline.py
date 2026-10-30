@@ -49,6 +49,22 @@ def main():
     with open(args.config, "r") as f:
         cfg = yaml.safe_load(f)
 
+    import os
+    mounted_models = Path(os.environ.get("FACE_MODEL_DIR", ""))
+    if mounted_models.is_dir():
+        flame_cfg = cfg.setdefault("flame", {})
+        for config_key, file_name in (
+            ("model", "flame2023_open.pkl"),
+            ("region_masks", "region_masks_open.npz"),
+            ("uv_layout", "uv_layout_open.npz"),
+        ):
+            candidate = mounted_models / file_name
+            if candidate.is_file():
+                flame_cfg[config_key] = str(candidate)
+        embedding = mounted_models / "mediapipe_embedding_open.npz"
+        if embedding.is_file():
+            cfg.setdefault("stage2", {})["mediapipe_embedding"] = str(embedding)
+
     if args.detail is not None:
         cfg.setdefault("stage3", {})["detail_level"] = max(0, min(100, args.detail))
 
