@@ -154,8 +154,10 @@ export function buildGeneratedFacialAnatomy(
     (front, p) => p.z * frontSign > front * frontSign ? p.z : front,
     lipPoints[0].z,
   );
-  const detailDepth = Math.max(mouthWidth * 0.018, 0.0006);
-  cavity.position.z = frontLipDepth + frontSign * detailDepth - mouthCenter.z;
+  // Keep the cavity behind the measured inner-lip surface. The previous
+  // outward offset made the dark opening itself float in front of the lips.
+  const detailDepth = Math.max(mouthWidth * 0.045, 0.0012);
+  cavity.position.z = frontLipDepth - frontSign * detailDepth - mouthCenter.z;
   mouth.add(cavity);
 
   const toothMaterial = new THREE.MeshStandardMaterial({ color: 0xf4eee1, roughness: 0.24, side: THREE.DoubleSide, depthTest: true });
@@ -163,7 +165,7 @@ export function buildGeneratedFacialAnatomy(
   const toothHeight = Math.max(mouthWidth * 0.055, 0.0015);
   // Give the teeth real front-to-back depth so the face texture cannot hide
   // them as soon as the mouth is recessed for a particular head fit.
-  const toothDepth = Math.max(mouthWidth * 0.22, 0.005);
+  const toothDepth = Math.max(mouthWidth * 0.12, 0.003);
   const upperTeeth: THREE.Mesh[] = [];
   const lowerTeeth: THREE.Mesh[] = [];
   for (let i = 0; i < 6; i++) {
@@ -174,8 +176,8 @@ export function buildGeneratedFacialAnatomy(
     const crownGeometry = new THREE.SphereGeometry(1, 20, 14);
     const upper = new THREE.Mesh(crownGeometry, toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
-    upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.78);
-    upper.scale.set(toothWidth * 0.43, toothHeight * 0.58, toothDepth);
+    upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.92);
+    upper.scale.set(toothWidth * 0.38, toothHeight * 0.52, toothDepth * 0.55);
     upper.userData.baseScaleY = upper.scale.y;
     mouth.add(upper);
     upperTeeth.push(upper);
@@ -183,7 +185,7 @@ export function buildGeneratedFacialAnatomy(
     const lower = new THREE.Mesh(crownGeometry.clone(), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
     lower.position.set(x, -neutralGap * 0.22 - toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.78);
-    lower.scale.set(toothWidth * 0.43, toothHeight * 0.58, toothDepth);
+    lower.scale.set(toothWidth * 0.38, toothHeight * 0.52, toothDepth * 0.55);
     lower.userData.baseScaleY = lower.scale.y;
     mouth.add(lower);
     lowerTeeth.push(lower);
@@ -197,7 +199,7 @@ export function buildGeneratedFacialAnatomy(
   tongue.scale.set(1.25, 0.32, 0.34);
   // The tongue belongs behind the tooth rows, not on the visible front
   // plane where it can visually replace them.
-  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z - frontSign * toothDepth * 1.05);
+  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z - frontSign * toothDepth * 1.25);
   mouth.add(tongue);
 
   // Small fitted mouth-corner anchors make a smile visibly lift and widen the
@@ -208,7 +210,7 @@ export function buildGeneratedFacialAnatomy(
       skin.clone(),
     );
     corner.name = side < 0 ? "AvatarAceMouthCornerLeft" : "AvatarAceMouthCornerRight";
-    corner.position.set(side * cavityWidth * 0.48, 0, cavity.position.z + frontSign * detailDepth * 0.45);
+    corner.position.set(side * cavityWidth * 0.48, 0, cavity.position.z - frontSign * detailDepth * 0.35);
     corner.scale.set(1, 0.72, 0.42);
     mouth.add(corner);
     return corner;
