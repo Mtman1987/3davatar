@@ -13,14 +13,6 @@ function point(points: [number, number, number][], index: number): THREE.Vector3
   return new THREE.Vector3(value[0], value[1], value[2]);
 }
 
-function polygon(points: THREE.Vector3[]): THREE.Shape {
-  const shape = new THREE.Shape();
-  shape.moveTo(points[0].x, points[0].y);
-  for (let i = 1; i < points.length; i++) shape.lineTo(points[i].x, points[i].y);
-  shape.closePath();
-  return shape;
-}
-
 function makeEye(points: [number, number, number][], centerIndex: number, ring: number[], skin: THREE.Material, side: string) {
   const eye = new THREE.Group();
   eye.name = "AvatarAceEye_" + side;
@@ -53,7 +45,7 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
       shape.lineTo(right.x, center.y);
     } else {
       shape.moveTo(left.x, center.y);
-      for (const p of [...arc].reverse()) shape.lineTo(p.x, p.y);
+      for (const p of arc) shape.lineTo(p.x, p.y);
       shape.lineTo(right.x, center.y);
     }
     shape.closePath();
