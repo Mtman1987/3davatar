@@ -265,6 +265,16 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     };
   }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, props.headScale, props.headY, props.headZ, booted]);
 
+  // Keep the complete native generated head interactive after its one-time
+  // load. Changing fit sliders must never reconstruct or refetch the head.
+  useEffect(() => {
+    const attachment = reconstructedHeadRef.current;
+    if (!attachment || props.modelUrl || !props.generatedHeadUrl) return;
+    attachment.scale.setScalar(props.headScale);
+    attachment.position.set(0, -0.06 + props.headY, props.headZ);
+    attachment.updateMatrixWorld(true);
+  }, [props.headScale, props.headY, props.headZ, props.generatedHeadUrl, props.modelUrl, booted]);
+
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
     // The commissioned model is intentionally view-only and must remain untouched.
