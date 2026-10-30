@@ -20,7 +20,7 @@ SKIN_CLASSES = (BODY_SKIN, FACE_SKIN)
 _DEFAULT_MODEL = Path(os.environ.get(
     "FACE_MEDIAPIPE_MODEL_DIR",
     str(Path(__file__).resolve().parents[2] / "models_cache" / "mediapipe"),
-)) / "selfie_multiclass_256x256.tflite""
+)) / "selfie_multiclass_256x256.tflite"
 _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
     "selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"
