@@ -147,9 +147,14 @@ export function buildGeneratedFacialAnatomy(
   cavityShape.absellipse(0, 0, cavityWidth * 0.5, neutralGap * 0.5, 0, Math.PI * 2, false, 0);
   const cavity = new THREE.Mesh(
     new THREE.ShapeGeometry(cavityShape, 24),
-    new THREE.MeshStandardMaterial({ color: 0x35151a, roughness: 0.95, side: THREE.DoubleSide }),
+    // The generated head is a continuous textured surface, so the inner
+    // mouth parts can be correctly positioned behind the lips yet still be
+    // depth-occluded by the face mesh. Render the cavity as an inset mouth
+    // layer; its animated aperture keeps it confined to the opening.
+    new THREE.MeshStandardMaterial({ color: 0x35151a, roughness: 0.95, side: THREE.DoubleSide, depthTest: false, depthWrite: false }),
   );
   cavity.name = "AvatarAceMouthCavity";
+  cavity.renderOrder = 20;
   const frontLipDepth = lipPoints.reduce(
     (front, p) => p.z * frontSign > front * frontSign ? p.z : front,
     lipPoints[0].z,
@@ -160,7 +165,11 @@ export function buildGeneratedFacialAnatomy(
   cavity.position.z = frontLipDepth - frontSign * detailDepth - mouthCenter.z;
   mouth.add(cavity);
 
-  const toothMaterial = new THREE.MeshStandardMaterial({ color: 0xf4eee1, roughness: 0.24, side: THREE.DoubleSide, depthTest: true });
+  // Teeth share the mouth's overlay depth policy so the continuous head
+  // surface cannot paint over them while the jaw is open. Their render order
+  // keeps enamel above the dark cavity, while their fitted Z keeps them
+  // visually behind the lip contour.
+  const toothMaterial = new THREE.MeshStandardMaterial({ color: 0xf4eee1, roughness: 0.24, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
   const toothWidth = Math.max(mouthWidth * 0.105, 0.002);
   const toothHeight = Math.max(mouthWidth * 0.055, 0.0015);
   // Give the teeth real front-to-back depth so the face texture cannot hide
@@ -176,6 +185,7 @@ export function buildGeneratedFacialAnatomy(
     const crownGeometry = new THREE.SphereGeometry(1, 20, 14);
     const upper = new THREE.Mesh(crownGeometry, toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
+    upper.renderOrder = 21;
     upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.92);
     upper.scale.set(toothWidth * 0.38, toothHeight * 0.52, toothDepth * 0.55);
     upper.userData.baseScaleY = upper.scale.y;
@@ -184,6 +194,7 @@ export function buildGeneratedFacialAnatomy(
 
     const lower = new THREE.Mesh(crownGeometry.clone(), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
+    lower.renderOrder = 21;
     lower.position.set(x, -neutralGap * 0.22 - toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.78);
     lower.scale.set(toothWidth * 0.38, toothHeight * 0.52, toothDepth * 0.55);
     lower.userData.baseScaleY = lower.scale.y;
@@ -193,9 +204,10 @@ export function buildGeneratedFacialAnatomy(
 
   const tongue = new THREE.Mesh(
     new THREE.SphereGeometry(Math.max(mouthWidth * 0.19, 0.004), 20, 12),
-    new THREE.MeshStandardMaterial({ color: 0xa94f59, roughness: 0.62 }),
+    new THREE.MeshStandardMaterial({ color: 0xa94f59, roughness: 0.62, depthTest: false, depthWrite: false }),
   );
   tongue.name = "AvatarAceTongue";
+  tongue.renderOrder = 22;
   tongue.scale.set(1.25, 0.32, 0.34);
   // The tongue belongs behind the tooth rows, not on the visible front
   // plane where it can visually replace them.
