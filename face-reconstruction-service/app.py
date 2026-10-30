@@ -14,10 +14,12 @@ from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-ROOT = Path(__file__).resolve().parent
 ROOT = Path(__file__).resolve().parents[1]
-PIPELINE_ROOT = Path(os.environ.get("FACE_PIPELINE_ROOT", str(ROOT)))
-MODEL_DIR = Path(os.environ.get("FACE_MODEL_DIR", str(ROOT / "data" / "flame_model")))
+PIPELINE_ROOT = Path(os.environ.get("FACE_PIPELINE_ROOT", str(ROOT))).resolve()
+MODEL_DIR = Path(os.environ.get("FACE_MODEL_DIR", str(ROOT / "data" / "flame_model"))).resolve()
+MEDIAPIPE_MODEL_DIR = Path(os.environ.get(
+    "FACE_MEDIAPIPE_MODEL_DIR", str(PIPELINE_ROOT / "models_cache" / "mediapipe")
+)).resolve()
 WORK_ROOT = Path(os.environ.get("FACE_WORK_ROOT", str(ROOT / ".local" / "face-reconstruction-jobs")))
 API_TOKEN = os.environ.get("FACE_RECONSTRUCTION_TOKEN", "")
 MAX_UPLOAD_BYTES = int(os.environ.get("FACE_MAX_UPLOAD_BYTES", str(12 * 1024 * 1024)))
@@ -50,13 +52,19 @@ def health() -> dict[str, Any]:
         "mediapipe_embedding_open.npz",
     )
     missing_models = [name for name in required_assets if not (MODEL_DIR / name).is_file()]
-    landmarker = PIPELINE_ROOT / "models_cache" / "mediapipe" / "face_landmarker.task"
+    landmarker = MEDIAPIPE_MODEL_DIR / "face_landmarker.task"
+    segmenter = MEDIAPIPE_MODEL_DIR / "selfie_multiclass_256x256.tflite"
     if not landmarker.is_file():
-        missing_models.append("models_cache/mediapipe/face_landmarker.task")
+        missing_models.append(str(landmarker))
+    if not segmenter.is_file():
+        missing_models.append(str(segmenter))
     return {
         "ok": True,
         "pipeline_available": (PIPELINE_ROOT / "scripts" / "run_pipeline.py").is_file(),
+        "pipeline_root": str(PIPELINE_ROOT),
+        "pipeline_entrypoint": str(PIPELINE_ROOT / "scripts" / "run_pipeline.py"),
         "model_dir": str(MODEL_DIR),
+        "mediapipe_model_dir": str(MEDIAPIPE_MODEL_DIR),
         "flame_model_available": (MODEL_DIR / "flame2023_open.pkl").is_file(),
         "missing_models": missing_models,
         "version": app.version,
