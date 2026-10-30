@@ -318,6 +318,7 @@ function Studio({
   const [animationIndex, setAnimationIndex] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
   const [morphWeights, setMorphWeights] = useState<Record<string, number>>({});
+  const [blinkSpeed, setBlinkSpeed] = useState(0.28);
 
   async function speakAi() {
     const engine = engineRef.current;
@@ -710,6 +711,7 @@ function FacePanel({ onCamera, onLibrary, onSample }: { onCamera: () => void; on
       <Slider label="Height" min={-0.06} max={0.08} step={0.005} value={state.headY} onChange={(headY) => state.patch({ headY })} />
       <Slider label="Depth" min={-0.04} max={0.1} step={0.005} value={state.headZ} onChange={(headZ) => state.patch({ headZ })} />
       <Slider label="Expression" min={0} max={1.4} step={0.01} value={state.expression} onChange={(expression) => state.patch({ expression })} />
+      <Slider label="Blink speed" min={0.08} max={0.8} step={0.01} value={blinkSpeed} onChange={setBlinkSpeed} />
     </div>
   );
 }
