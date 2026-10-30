@@ -108,14 +108,18 @@ export function buildGeneratedFacialAnatomy(
   return root;
 }
 
-export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number) {
+export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28) {
   const data = root.userData.avatarAceAnatomy as { eyes: THREE.Group[]; mouth: THREE.Group } | undefined;
   if (!data) return;
+  const clock = Number(root.userData.autoBlinkClock ?? 0) + Math.max(0, delta);
+  root.userData.autoBlinkClock = clock % 10;
+  const cycle = (clock * Math.max(0, blinkSpeed)) % 1;
+  const autoBlink = cycle < 0.055 ? Math.sin((cycle / 0.055) * Math.PI) : 0;
   for (const [index, eye] of data.eyes.entries()) {
     const lid = eye.userData.blinkLid as THREE.Mesh | undefined;
     if (!lid) continue;
     const name = index === 0 ? "eyeBlinkLeft" : "eyeBlinkRight";
-    const target = THREE.MathUtils.clamp(weights[name] ?? weights.eyeBlink ?? 0, 0, 1);
+    const target = Math.max(autoBlink, THREE.MathUtils.clamp(weights[name] ?? weights.eyeBlink ?? 0, 0, 1));
     const current = lid.userData.blink ?? 0;
     const next = THREE.MathUtils.damp(current, target, 28, Math.max(0, delta));
     lid.userData.blink = next;
