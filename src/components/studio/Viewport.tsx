@@ -221,6 +221,13 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       attachment.name = "AvatarAceGeneratedHeadAttachment";
       attachment.add(generatedHead);
       anchorBone.add(attachment);
+      // The lowest neck joint in the body rig is often pitched forward.
+      // The generated bundle is authored upright with its origin at the neck,
+      // so cancel the anchor's inherited world rotation while retaining its
+      // world position. This keeps the head vertical instead of leaning with
+      // the neck chain's bind pose.
+      const anchorWorldQuaternion = anchorBone.getWorldQuaternion(new THREE.Quaternion());
+      attachment.quaternion.copy(anchorWorldQuaternion.invert());
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
