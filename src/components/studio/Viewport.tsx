@@ -26,6 +26,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const modelRef = useRef<LoadedModel | null>(null);
   const faceMeshRef = useRef<THREE.Mesh | null>(null);
+  const reconstructedHeadRef = useRef<THREE.Group | null>(null);
   const [booted, setBooted] = useState(0);
 
   useImperativeHandle(ref, () => ({
@@ -122,6 +123,58 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   },[props.modelUrl,props.bodyAsset,props.modelName]);
 
   useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl || props.bodyAsset !== "female") return;
+    let cancelled = false;
+    const loader = new GLTFLoader();
+    loader.load("/models/reconstructed/first-face.glb", (gltf) => {
+      if (cancelled || modelRef.current !== loaded) {
+        disposeModel(gltf.scene);
+        return;
+      }
+      const headBone = findExactHeadBone(loaded.root);
+      if (!headBone) {
+        disposeModel(gltf.scene);
+        propsRef.current.onError?.("Reconstructed head could not attach: female body has no exact head bone.");
+        return;
+      }
+
+      const bounds = new THREE.Box3().setFromObject(gltf.scene);
+      if (bounds.isEmpty()) {
+        disposeModel(gltf.scene);
+        propsRef.current.onError?.("Reconstructed head GLB contains no visible geometry.");
+        return;
+      }
+
+      // The reconstruction is exported as a head-centred, Y-up GLB. Place its
+      // bottom at the female rig's actual head joint and center it on that joint.
+      // Keep the GLB scene/materials intact so its embedded photo texture survives.
+      const center = bounds.getCenter(new THREE.Vector3());
+      gltf.scene.position.set(-center.x, -bounds.min.y, -center.z);
+      const attachment = new THREE.Group();
+      attachment.name = "AvatarAceReconstructedHead";
+      attachment.add(gltf.scene);
+      headBone.add(attachment);
+      loaded.root.updateMatrixWorld(true);
+      reconstructedHeadRef.current = attachment;
+    }, undefined, (error) => {
+      if (cancelled) return;
+      const detail = error instanceof Error ? error.message : "Unknown GLB loading error";
+      propsRef.current.onError?.("Failed to load reconstructed head /models/reconstructed/first-face.glb: " + detail);
+    });
+
+    return () => {
+      cancelled = true;
+      const attachment = reconstructedHeadRef.current;
+      if (attachment) {
+        attachment.parent?.remove(attachment);
+        disposeModel(attachment);
+        reconstructedHeadRef.current = null;
+      }
+    };
+  }, [props.modelUrl, props.bodyAsset, props.modelName, booted]);
+
+  useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
     // The commissioned model is intentionally view-only and must remain untouched.
     const loaded = modelRef.current;
@@ -133,7 +186,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
   useEffect(() => {
     const loaded = modelRef.current;
-    if (!loaded || props.modelUrl) return;
+    if (!loaded || props.modelUrl || props.bodyAsset === "female") return;
     if (faceMeshRef.current) {
       faceMeshRef.current.parent?.remove(faceMeshRef.current);
       disposeFaceMesh(faceMeshRef.current);
@@ -280,6 +333,17 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
     });
     mesh.material = Array.isArray(mesh.material) ? next : next[0]!;
   });
+}
+
+function findExactHeadBone(root: THREE.Object3D): THREE.Bone | null {
+  let exact: THREE.Bone | null = null;
+  root.traverse((object) => {
+    const bone = object as THREE.Bone;
+    if (!bone.isBone) return;
+    const name = bone.name.toLowerCase().replace(/[^a-z]/g, "");
+    if (name === "head") exact = bone;
+  });
+  return exact;
 }
 
 function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
