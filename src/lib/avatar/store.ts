@@ -14,7 +14,7 @@ type StudioState = {
 export const useStudio = create<StudioState>((set) => ({
   screen: "home", panel: "body", bodyAsset: "male", modelUrl: null, modelName: null, generatedHeadUrl: null,
   outfit: "hoodie", hair: "short", skin: "sand", faceChoice: "standard", preset: "captured",
-  headScale: 1, headY: 0, headZ: 0, expression: 1, status: "idle", statusText: "", error: null,
+  headScale: 0.79, headY: 0, headZ: 0.085, expression: 1.04, status: "idle", statusText: "", error: null,
   hasFace: false, faceRev: 0, photoPreview: null, talk: "off", talkNote: null,
   line: "Hey, I'm ready when you are.", voiceId: "eve", morphNames: [], animationNames: [],
   patch: (partial) => set(partial),
