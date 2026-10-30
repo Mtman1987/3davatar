@@ -6,10 +6,7 @@ import * as THREE from "three";
  */
 export const AVATAR_SKIN_ROUGHNESS = 0.78;
 
-let poreNormalTexture: THREE.CanvasTexture | null = null;
-
-function getPoreNormalTexture(): THREE.CanvasTexture | null {
-  if (poreNormalTexture) return poreNormalTexture;
+function createPoreNormalTexture(): THREE.CanvasTexture | null {
   if (typeof document === "undefined") return null;
   const canvas = document.createElement("canvas");
   canvas.width = 96;
@@ -29,12 +26,12 @@ function getPoreNormalTexture(): THREE.CanvasTexture | null {
     }
   }
   context.putImageData(image, 0, 0);
-  poreNormalTexture = new THREE.CanvasTexture(canvas);
-  poreNormalTexture.wrapS = THREE.RepeatWrapping;
-  poreNormalTexture.wrapT = THREE.RepeatWrapping;
-  poreNormalTexture.repeat.set(5, 5);
-  poreNormalTexture.needsUpdate = true;
-  return poreNormalTexture;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(5, 5);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 /** Apply the same diffuse/matte surface response to every AvatarAce skin mesh. */
@@ -55,7 +52,7 @@ export function applyAvatarSkinSurface(material: THREE.Material): void {
     material.thickness = 0;
   }
   if (!material.normalMap) {
-    const pores = getPoreNormalTexture();
+    const pores = createPoreNormalTexture();
     if (pores) {
       material.normalMap = pores;
       material.normalScale.set(0.025, 0.025);
