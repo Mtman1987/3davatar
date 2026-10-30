@@ -434,7 +434,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
   const separateHeadParts: THREE.Mesh[] = [];
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh || mesh.isSkinnedMesh) return;
+    if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
     const name = mesh.name.toLowerCase().replace(/[^a-z]/g, "");
     if (/^(head|face|skull|cranium|originalhead|originalface)$/.test(name)) {
       separateHeadParts.push(mesh);
