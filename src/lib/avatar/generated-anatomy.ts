@@ -68,41 +68,60 @@ export function buildGeneratedFacialAnatomy(
 
   const lipPoints = INNER_LIPS.map((index) => point(points, index));
   const mouthCenter = lipPoints.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / lipPoints.length);
-  const mouthDepth = Math.max(...lipPoints.map((p) => p.z)) + 0.008;
+  const mouthWidth = Math.max(...lipPoints.map((p) => p.x)) - Math.min(...lipPoints.map((p) => p.x));
+  const measuredHeight = Math.max(...lipPoints.map((p) => p.y)) - Math.min(...lipPoints.map((p) => p.y));
   const mouth = new THREE.Group();
   mouth.name = "AvatarAceArticulatedMouth";
-  const cavityPoints = lipPoints.map((p) => new THREE.Vector3(p.x, p.y, mouthDepth));
+  mouth.position.copy(mouthCenter);
+
+  // Build a real dark opening with a non-zero neutral aperture. Scaling this
+  // cavity alone lets the mouth visibly open even when the source photo has
+  // its lips together and the inner-lip landmarks have almost no vertical gap.
+  const cavityWidth = Math.max(mouthWidth * 0.9, 0.008);
+  const neutralGap = Math.max(measuredHeight * 0.55, mouthWidth * 0.018, 0.0015);
+  const cavityShape = new THREE.Shape();
+  cavityShape.absellipse(0, 0, cavityWidth * 0.5, neutralGap * 0.5, 0, Math.PI * 2, false, 0);
   const cavity = new THREE.Mesh(
-    new THREE.ShapeGeometry(polygon(cavityPoints)),
+    new THREE.ShapeGeometry(cavityShape, 24),
     new THREE.MeshStandardMaterial({ color: 0x35151a, roughness: 0.95, side: THREE.DoubleSide }),
   );
   cavity.name = "AvatarAceMouthCavity";
+  cavity.position.z = Math.max(...lipPoints.map((p) => p.z)) + 0.009 - mouthCenter.z;
   mouth.add(cavity);
 
-  const mouthWidth = Math.max(...lipPoints.map((p) => p.x)) - Math.min(...lipPoints.map((p) => p.x));
-  const mouthHeight = Math.max(...lipPoints.map((p) => p.y)) - Math.min(...lipPoints.map((p) => p.y));
   const toothMaterial = new THREE.MeshStandardMaterial({ color: 0xf4eee1, roughness: 0.24 });
-  const toothWidth = mouthWidth * 0.105;
+  const toothWidth = Math.max(mouthWidth * 0.105, 0.002);
+  const toothHeight = Math.max(mouthWidth * 0.055, 0.0015);
+  const upperTeeth: THREE.Mesh[] = [];
+  const lowerTeeth: THREE.Mesh[] = [];
   for (let i = 0; i < 6; i++) {
-    const x = mouthCenter.x + (i - 2.5) * toothWidth * 0.91;
-    for (const upper of [true, false]) {
-      const tooth = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, Math.max(mouthHeight * 0.22, 0.003), mouthWidth * 0.055), toothMaterial);
-      tooth.name = (upper ? "AvatarAceUpperTooth_" : "AvatarAceLowerTooth_") + i;
-      tooth.position.set(x, mouthCenter.y + (upper ? mouthHeight * 0.22 : -mouthHeight * 0.22), mouthDepth + 0.012);
-      mouth.add(tooth);
-    }
+    const x = (i - 2.5) * toothWidth * 0.91;
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, toothHeight, mouthWidth * 0.045), toothMaterial);
+    upper.name = "AvatarAceUpperTooth_" + i;
+    upper.position.set(x, neutralGap * 0.42 + toothHeight * 0.5, cavity.position.z + 0.012);
+    mouth.add(upper);
+    upperTeeth.push(upper);
+
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(toothWidth * 0.86, toothHeight, mouthWidth * 0.045), toothMaterial);
+    lower.name = "AvatarAceLowerTooth_" + i;
+    lower.position.set(x, -neutralGap * 0.42 - toothHeight * 0.5, cavity.position.z + 0.012);
+    mouth.add(lower);
+    lowerTeeth.push(lower);
   }
+
   const tongue = new THREE.Mesh(
     new THREE.SphereGeometry(Math.max(mouthWidth * 0.19, 0.004), 20, 12),
     new THREE.MeshStandardMaterial({ color: 0xa94f59, roughness: 0.62 }),
   );
   tongue.name = "AvatarAceTongue";
   tongue.scale.set(1.25, 0.32, 0.34);
-  tongue.position.set(mouthCenter.x, mouthCenter.y - mouthHeight * 0.23, mouthDepth + 0.016);
+  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z + 0.016);
   mouth.add(tongue);
-  mouth.position.set(0, 0, 0);
-  mouth.userData.mouthCenterY = mouthCenter.y;
-  mouth.userData.neutralMouthHeight = Math.max(mouthHeight, 0.002);
+  mouth.userData.cavity = cavity;
+  mouth.userData.upperTeeth = upperTeeth;
+  mouth.userData.lowerTeeth = lowerTeeth;
+  mouth.userData.tongue = tongue;
+  mouth.userData.neutralGap = neutralGap;
   root.add(mouth);
   root.userData.avatarAceAnatomy = { eyes: root.children.slice(0, 2), mouth };
   return root;
@@ -111,10 +130,11 @@ export function buildGeneratedFacialAnatomy(
 export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28) {
   const data = root.userData.avatarAceAnatomy as { eyes: THREE.Group[]; mouth: THREE.Group } | undefined;
   if (!data) return;
-  const clock = Number(root.userData.autoBlinkClock ?? 0) + Math.max(0, delta);
-  root.userData.autoBlinkClock = clock % 10;
-  const cycle = (clock * Math.max(0, blinkSpeed)) % 1;
-  const autoBlink = cycle < 0.055 ? Math.sin((cycle / 0.055) * Math.PI) : 0;
+  const clock = Number(root.userData.autoBlinkClock ?? 1.25) + Math.max(0, delta);
+  root.userData.autoBlinkClock = clock % 20;
+  const cycle = (clock * THREE.MathUtils.clamp(blinkSpeed, 0.08, 0.8)) % 1;
+  const blinkWindow = 0.11;
+  const autoBlink = cycle < blinkWindow ? Math.sin((cycle / blinkWindow) * Math.PI) : 0;
   for (const [index, eye] of data.eyes.entries()) {
     const lid = eye.userData.blinkLid as THREE.Mesh | undefined;
     if (!lid) continue;
@@ -127,8 +147,13 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   }
   const jaw = THREE.MathUtils.clamp(weights.jawOpen ?? 0, 0, 1);
   const mouth = data.mouth;
-  const centerY = Number(mouth.userData.mouthCenterY ?? 0);
-  const opening = 1 + jaw * 1.8;
-  mouth.scale.y = opening;
-  mouth.position.y = centerY * (1 - opening);
+  const cavity = mouth.userData.cavity as THREE.Mesh | undefined;
+  const lowerTeeth = mouth.userData.lowerTeeth as THREE.Mesh[] | undefined;
+  const tongue = mouth.userData.tongue as THREE.Mesh | undefined;
+  const neutralGap = Number(mouth.userData.neutralGap ?? 0.0015);
+  const opening = 1 + jaw * 7;
+  if (cavity) cavity.scale.y = opening;
+  const jawDrop = jaw * Math.max(neutralGap * 5, 0.012);
+  for (const tooth of lowerTeeth ?? []) tooth.position.y = -neutralGap * 0.42 - tooth.geometry.parameters.height * 0.5 - jawDrop;
+  if (tongue) tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
 }
