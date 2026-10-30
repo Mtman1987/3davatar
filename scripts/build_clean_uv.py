@@ -185,8 +185,8 @@ def main():
     ap.add_argument("--margin", type=float, default=0.01)
     ap.add_argument("--min-island", type=int, default=150)
     a = ap.parse_args()
-    from src.utils.flame_torch import load_flame
-    flame = load_flame(str(ROOT / a.flame))
+    from src.utils.flame_model import FLAMEModel
+    flame = FLAMEModel(str(ROOT / a.flame))
     v, faces = np.asarray(flame.v_template, np.float64), flame.faces.astype(np.int64)
     m = dict(np.load(ROOT / a.masks))
     V = len(v)

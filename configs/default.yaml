@@ -112,7 +112,7 @@ stage8:
 
 evaluation:
   enabled: true                   # overlays, turntables, report.json
-  judge: insightface              # identity judge for metrics only (research-licensed model, not shipped)
+  judge: none              # identity judge for metrics only (research-licensed model, not shipped)
 
 render:
   enabled: false                  # Blender Cycles look-dev (slow on CPU); enable explicitly

@@ -842,7 +842,9 @@ def _texel_density_ratio(verts, faces, uv, uvf, ras, target, source) -> float:
     t3 = verts[faces]
     a3 = 0.5 * np.linalg.norm(np.cross(t3[:, 1] - t3[:, 0], t3[:, 2] - t3[:, 0]), axis=1)
     t2 = uv[uvf]
-    a2 = 0.5 * np.abs(np.cross(t2[:, 1] - t2[:, 0], t2[:, 2] - t2[:, 0]))
+    e1 = t2[:, 1] - t2[:, 0]
+    e2 = t2[:, 2] - t2[:, 0]
+    a2 = 0.5 * np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])
     dens = np.sqrt(a2 / np.maximum(a3, 1e-12))
     fid = ras.face_id
     dt, ds = fid[target & (fid >= 0)], fid[source & (fid >= 0)]
