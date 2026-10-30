@@ -76,33 +76,38 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   const lowerArc = contour.filter((p) => p.y < center.y).sort((a, b) => a.x - b.x);
   const left = contour.reduce((best, p) => p.x < best.x ? p : best, contour[0]);
   const right = contour.reduce((best, p) => p.x > best.x ? p : best, contour[0]);
-  const makeLid = (arc: THREE.Vector3[], upper: boolean) => {
-    const shape = new THREE.Shape();
-    if (upper) {
-      shape.moveTo(left.x, center.y);
-      for (const p of arc) shape.lineTo(p.x, p.y);
-      shape.lineTo(right.x, center.y);
-    } else {
-      shape.moveTo(left.x, center.y);
-      for (const p of arc) shape.lineTo(p.x, p.y);
-      shape.lineTo(right.x, center.y);
-    }
-    shape.closePath();
-    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 16), skin.clone());
-    mesh.name = "AvatarAce" + (upper ? "Upper" : "Lower") + "BlinkLid_" + side;
-    mesh.geometry.translate(0, -center.y, 0);
-    // The globe front surface reaches roughly lidDepth + 0.38 * radius. Keep the fitted lid patch just in front of it so the open lids remain visible and can slide over the eye during a blink.
-    mesh.position.set(0, center.y, lidDepth + frontSign * radius * 0.52);
-    mesh.scale.y = 0.001;
-    mesh.renderOrder = 5;
-    eye.add(mesh);
-    return mesh;
-  };
-  const upperLid = makeLid(upperArc, true);
-  const lowerLid = makeLid(lowerArc, false);
+  const upperShape = new THREE.Shape();
+  upperShape.moveTo(left.x, lowerArc[0].y);
+  for (const p of upperArc) upperShape.lineTo(p.x, p.y);
+  upperShape.lineTo(right.x, lowerArc[lowerArc.length - 1].y);
+  for (const p of [...lowerArc].reverse()) upperShape.lineTo(p.x, p.y);
+  upperShape.closePath();
+  const upperLid = new THREE.Mesh(new THREE.ShapeGeometry(upperShape, 24), skin.clone());
+  upperLid.name = "AvatarAceUpperBlinkLid_" + side;
+  upperLid.geometry.translate(0, -center.y, 0);
+  const upperHeight = Math.max(...contour.map((p) => p.y)) - Math.min(...contour.map((p) => p.y));
+  // Anchor the upper lid at the top of the aperture. During a blink it
+  // travels down over the eye instead of expanding upward from the lower rim.
+  upperLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.52);
+  upperLid.scale.y = 0.001;
+  upperLid.renderOrder = 5;
+  eye.add(upperLid);
+  const lowerShape = new THREE.Shape();
+  lowerShape.moveTo(left.x, center.y);
+  for (const p of lowerArc) lowerShape.lineTo(p.x, p.y);
+  lowerShape.lineTo(right.x, center.y);
+  lowerShape.closePath();
+  const lowerLid = new THREE.Mesh(new THREE.ShapeGeometry(lowerShape, 16), skin.clone());
+  lowerLid.name = "AvatarAceLowerBlinkLid_" + side;
+  lowerLid.geometry.translate(0, -center.y, 0);
+  lowerLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.53);
+  lowerLid.scale.y = 0.001;
+  lowerLid.renderOrder = 6;
+  eye.add(lowerLid);
   eye.userData.upperBlinkLid = upperLid;
   eye.userData.lowerBlinkLid = lowerLid;
   eye.userData.eyeCenter = center;
+  eye.userData.lidHeight = height;
   return eye;
 }
 
@@ -158,7 +163,7 @@ export function buildGeneratedFacialAnatomy(
   const toothHeight = Math.max(mouthWidth * 0.055, 0.0015);
   // Give the teeth real front-to-back depth so the face texture cannot hide
   // them as soon as the mouth is recessed for a particular head fit.
-  const toothDepth = Math.max(mouthWidth * 0.16, 0.004);
+  const toothDepth = Math.max(mouthWidth * 0.22, 0.005);
   const upperTeeth: THREE.Mesh[] = [];
   const lowerTeeth: THREE.Mesh[] = [];
   for (let i = 0; i < 6; i++) {
@@ -169,7 +174,7 @@ export function buildGeneratedFacialAnatomy(
     const crownGeometry = new THREE.SphereGeometry(1, 20, 14);
     const upper = new THREE.Mesh(crownGeometry, toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
-    upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.35);
+    upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.78);
     upper.scale.set(toothWidth * 0.43, toothHeight * 0.58, toothDepth);
     upper.userData.baseScaleY = upper.scale.y;
     mouth.add(upper);
@@ -177,7 +182,7 @@ export function buildGeneratedFacialAnatomy(
 
     const lower = new THREE.Mesh(crownGeometry.clone(), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
-    lower.position.set(x, -neutralGap * 0.22 - toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.35);
+    lower.position.set(x, -neutralGap * 0.22 - toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.78);
     lower.scale.set(toothWidth * 0.43, toothHeight * 0.58, toothDepth);
     lower.userData.baseScaleY = lower.scale.y;
     mouth.add(lower);
@@ -192,7 +197,7 @@ export function buildGeneratedFacialAnatomy(
   tongue.scale.set(1.25, 0.32, 0.34);
   // The tongue belongs behind the tooth rows, not on the visible front
   // plane where it can visually replace them.
-  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z - frontSign * toothDepth * 0.55);
+  tongue.position.set(0, -neutralGap * 0.55, cavity.position.z - frontSign * toothDepth * 1.05);
   mouth.add(tongue);
 
   // Small fitted mouth-corner anchors make a smile visibly lift and widen the
@@ -252,10 +257,13 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     const next = THREE.MathUtils.damp(current, target, 28, Math.max(0, delta));
     upperLid.userData.blink = next;
     lowerLid.userData.blink = next;
-    // Near-zero scale is the open resting pose; both fitted lid halves meet
-    // only when the blink weight approaches one.
+    // The full-aperture upper lid is pinned at its top edge and travels
+    // downward as it closes. The lower rim stays subtle instead of sweeping
+    // upward and making the eye look as though it closes from below.
+    const lidHeight = Number(eye.userData.lidHeight ?? 0);
     upperLid.scale.y = 0.001 + next * 0.999;
-    lowerLid.scale.y = 0.001 + next * 0.999;
+    upperLid.position.y = Number(eye.userData.eyeCenter instanceof THREE.Vector3 ? eye.userData.eyeCenter.y : 0) - lidHeight * 0.5 * next;
+    lowerLid.scale.y = 0.001 + next * 0.12;
   }
   const jaw = THREE.MathUtils.clamp(
     Math.max(weights.jawOpen ?? 0, weights.mouthOpen ?? 0, weights.viseme_aa ?? 0),
