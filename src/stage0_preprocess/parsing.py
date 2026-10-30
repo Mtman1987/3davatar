@@ -7,6 +7,7 @@ classes, so hair, background and clothing never land in the skin UV (DOCS/01 R4)
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional, Union
 
@@ -16,7 +17,10 @@ import numpy as np
 BACKGROUND, HAIR, BODY_SKIN, FACE_SKIN, CLOTHES, OTHER = range(6)
 SKIN_CLASSES = (BODY_SKIN, FACE_SKIN)
 
-_DEFAULT_MODEL = Path(__file__).resolve().parents[2] / "models_cache" / "mediapipe" / "selfie_multiclass_256x256.tflite"
+_DEFAULT_MODEL = Path(os.environ.get(
+    "FACE_MEDIAPIPE_MODEL_DIR",
+    str(Path(__file__).resolve().parents[2] / "models_cache" / "mediapipe"),
+)) / "selfie_multiclass_256x256.tflite""
 _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
     "selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"
