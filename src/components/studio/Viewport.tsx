@@ -123,6 +123,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       const presetWeights = current.preset === "captured" ? {} : PRESETS[current.preset];
       const allWeights: Record<string,number> = {...presetWeights,...(sound ?? {}),...(tracking ?? {}),...(current.manualMorphs ?? {})};
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
+      // The reconstructed head is the authoritative ARKit face rig. Drive it
+      // explicitly as well as the body root so expressions never depend on
+      // whether the generated attachment is discoverable in the body's tree.
+      const generatedHead = reconstructedHeadRef.current;
+      if (generatedHead) applyMorphs(generatedHead,allWeights,current.expression);
       renderer.render(scene,camera);
     };
     loop();setBooted(n=>n+1);
