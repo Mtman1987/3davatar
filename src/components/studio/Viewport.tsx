@@ -14,7 +14,7 @@ export type ModelInfo = { morphNames: string[]; animationNames: string[] };
 type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null; generatedHeadUrl?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
-  headScale: number; headY: number; headZ: number; eyeDepth?: number; expression: number; faceRev: number; blinkSpeed?: number;
+  headScale: number; headY: number; headZ: number; eyeDepth?: number; mouthDepth?: number; expression: number; faceRev: number; blinkSpeed?: number;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
@@ -133,7 +133,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
          applyMorphs(generatedHead,allWeights,current.expression);
          const anatomy = generatedHead.getObjectByName("AvatarAceSubjectFittedAnatomy");
          const jawBone = generatedHead.getObjectByName("jaw") as THREE.Bone | null;
-         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta, current.blinkSpeed ?? 0.28, jawBone, current.eyeDepth ?? 0);
+         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta, current.blinkSpeed ?? 0.28, jawBone, current.eyeDepth ?? 0, current.mouthDepth ?? 0);
        }
       renderer.render(scene,camera);
     };
