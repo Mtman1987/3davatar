@@ -333,36 +333,54 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   if (!manifest.neutral_base_obj || !manifest.blendshapes_json) {
     throw new Error("Generated head manifest must reference neutral_base_obj and blendshapes_json.");
   }
+  // A generated head is not considered animation-ready unless its own
+  // subject-fitted landmarks and anatomical rig are present. Do not silently
+  // substitute floating primitives or an unrigged static mesh.
+  if (!manifest.armature_json) {
+    throw new Error("Generated head is missing armature_json. Re-run Stage 5 export with the facial rig enabled.");
+  }
+  if (!manifest.facial_landmarks_json) {
+    throw new Error("Generated head is missing facial_landmarks_json. Re-run reconstruction so subject-fitted eye and mouth anchors are exported.");
+  }
 
   const [objResponse, morphResponse, rigResponse, landmarksResponse] = await Promise.all([
     fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.neutral_base_obj)),
     fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.blendshapes_json)),
-    manifest.armature_json
-      ? fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.armature_json))
-      : Promise.resolve(null),
-    manifest.facial_landmarks_json
-      ? fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.facial_landmarks_json))
-      : Promise.resolve(null),
+    fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.armature_json)),
+    fetchHeadAsset(generatedHeadAssetUrl(manifestUrl, manifest.facial_landmarks_json)),
   ]);
   if (!objResponse.ok) throw new Error("Generated head OBJ request failed: HTTP " + objResponse.status);
   if (!morphResponse.ok) throw new Error("Generated head morph request failed: HTTP " + morphResponse.status);
-  if (rigResponse && !rigResponse.ok) throw new Error("Generated head rig request failed: HTTP " + rigResponse.status);
-  if (landmarksResponse && !landmarksResponse.ok) throw new Error("Generated facial landmarks request failed: HTTP " + landmarksResponse.status);
+  if (!rigResponse.ok) throw new Error("Generated head rig request failed: HTTP " + rigResponse.status);
+  if (!landmarksResponse.ok) throw new Error("Generated facial landmarks request failed: HTTP " + landmarksResponse.status);
 
   const [objText, morphs, rig, facialLandmarks] = await Promise.all([
     objResponse.text(),
     morphResponse.json() as Promise<GeneratedHeadBlendshapes>,
-    rigResponse ? rigResponse.json() as Promise<GeneratedHeadArmature> : Promise.resolve(null),
-    landmarksResponse ? landmarksResponse.json() as Promise<GeneratedHeadFacialLandmarks> : Promise.resolve(null),
+    rigResponse.json() as Promise<GeneratedHeadArmature>,
+    landmarksResponse.json() as Promise<GeneratedHeadFacialLandmarks>,
   ]);
-  if (facialLandmarks && (
+  if (
     facialLandmarks.coordinate_space !== "same_as_neutral_base_obj" ||
     facialLandmarks.units !== "meters" ||
     facialLandmarks.points.length !== facialLandmarks.landmark_count ||
     facialLandmarks.landmark_count < 478 ||
     facialLandmarks.points.some((point) => point.length !== 3 || point.some((value) => !Number.isFinite(value)))
-  )) {
+  ) {
     throw new Error("Generated facial landmark asset has invalid coordinates or metadata.");
+  }
+  const requiredJoints = ["neck", "head", "jaw", "eye_L", "eye_R"];
+  if (
+    !Array.isArray(rig.joint_names) ||
+    requiredJoints.some((name) => !rig.joint_names.includes(name) || !rig.joints?.[name]) ||
+    !Array.isArray(rig.skinning_weights) ||
+    rig.skinning_weights.length !== rig.num_vertices ||
+    rig.skinning_weights.some((row) =>
+      !Array.isArray(row) || row.length !== rig.joint_names.length ||
+      row.some((weight) => !Number.isFinite(weight) || weight < 0)
+    )
+  ) {
+    throw new Error("Generated head armature is incomplete or has invalid skinning weights.");
   }
   const built = buildGeneratedHeadGeometry(objText, morphs, rig);
   const group = new THREE.Group();
@@ -431,7 +449,7 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     group.add(mesh);
   }
 
-  const neckPosition = rig?.joints?.neck?.position;
+  const neckPosition = rig.joints.neck.position;
   if (Array.isArray(neckPosition) && neckPosition.length >= 3) {
     group.position.set(-neckPosition[0], -neckPosition[1], -neckPosition[2]);
   }
@@ -448,9 +466,12 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     sourceVertexCount: built.vertexCount,
     sourceTriangleCount: built.geometry.getAttribute("position").count / 3,
     morphNames: Object.keys(morphs.blendshapes),
-    hasFacialRig: Boolean(rig),
-    facialLandmarks: facialLandmarks?.points ?? null,
-    facialLandmarkSource: facialLandmarks?.source ?? null,
+    hasFacialRig: true,
+    hasJawJoint: true,
+    hasSubjectFittedFacialAnatomy: true,
+    facialLandmarkCount: facialLandmarks.landmark_count,
+    facialLandmarks: facialLandmarks.points,
+    facialLandmarkSource: facialLandmarks.source ?? null,
   };
   group.updateMatrixWorld(true);
   return group;
