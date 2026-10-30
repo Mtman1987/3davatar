@@ -263,7 +263,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       }
       if (reconstructedHeadRef.current === attachment) reconstructedHeadRef.current = null;
     };
-  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, props.headScale, props.headY, props.headZ, booted]);
+  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, booted]);
 
   // Keep the complete native generated head interactive after its one-time
   // load. Changing fit sliders must never reconstruct or refetch the head.
