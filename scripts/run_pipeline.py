@@ -68,6 +68,11 @@ def main():
     if args.detail is not None:
         cfg.setdefault("stage3", {})["detail_level"] = max(0, min(100, args.detail))
 
+    # The hosted CPU service does not require Blender. Keep its optional clay preview
+    # out of the production job; geometry, textures, PBR maps, and Stage 5 still run.
+    if os.environ.get("FACE_RECONSTRUCTION_SKIP_CLAY", "").lower() in {"1", "true", "yes"}:
+        cfg.setdefault("evaluation", {})["clay_renders"] = False
+
     pipeline = FaceGeoPipeline(cfg=cfg)
     manifest = pipeline.run(args.photos, args.output)
 
