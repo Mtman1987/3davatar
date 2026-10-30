@@ -27,6 +27,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   const modelRef = useRef<LoadedModel | null>(null);
   const faceMeshRef = useRef<THREE.Mesh | null>(null);
   const reconstructedHeadRef = useRef<THREE.Group | null>(null);
+  const syncOrbitRef = useRef<(() => void) | null>(null);
   const [booted, setBooted] = useState(0);
 
   useImperativeHandle(ref, () => ({
@@ -65,6 +66,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       pitch = clamp(Math.acos(clamp(direction.y, -1, 1)), 0.15, Math.PI - 0.15);
       yaw = Math.atan2(direction.x, direction.z);
     };
+    syncOrbitRef.current = syncOrbitFromCamera;
     const onDown = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -127,7 +129,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       canvas.removeEventListener("pointerdown",onDown);canvas.removeEventListener("pointermove",onMove);canvas.removeEventListener("pointerup",onUp);canvas.removeEventListener("pointercancel",onUp);
       if(modelRef.current){scene.remove(modelRef.current.root);disposeModel(modelRef.current.root);modelRef.current.mixer?.stopAllAction();modelRef.current=null;}
       ground.geometry.dispose();(ground.material as THREE.Material).dispose();renderer.dispose();canvas.remove();
-      rendererRef.current=null;sceneRef.current=null;cameraRef.current=null;
+      syncOrbitRef.current=null;rendererRef.current=null;sceneRef.current=null;cameraRef.current=null;
     };
   }, []);
 
@@ -173,7 +175,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       camera.position.set(target.x+0.08,target.y+0.04,fitDistance);camera.lookAt(target);
       // Keep the orbit controller in sync with the fitted camera so the first
       // gesture continues from the visible pose instead of snapping to defaults.
-      syncOrbitFromCamera();
+      syncOrbitRef.current?.();
       const clips=gltf.animations ?? [];const mixer=clips.length?new THREE.AnimationMixer(root):null;
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
@@ -508,7 +510,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
       if (originalGroups.length) {
         geometry.clearGroups();
         for (const group of rebuiltGroups) {
-          geometry.addGroup(group.start, group.count, group.materialIndex);
+          geometry.addGroup(group.start, group.count, group.materialIndex ?? 0);
         }
       }
       geometry.computeVertexNormals();
