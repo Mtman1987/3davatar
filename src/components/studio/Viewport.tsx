@@ -13,7 +13,7 @@ export type ModelInfo = { morphNames: string[]; animationNames: string[] };
 type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null; generatedHeadUrl?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
-  headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
+  headScale: number; headY: number; headZ: number; expression: number; faceRev: number; blinkSpeed?: number;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
@@ -131,7 +131,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       if (generatedHead) {
          applyMorphs(generatedHead,allWeights,current.expression);
          const anatomy = generatedHead.getObjectByName("AvatarAceSubjectFittedAnatomy");
-         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta);
+         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta, current.blinkSpeed ?? 0.28);
        }
       renderer.render(scene,camera);
     };
