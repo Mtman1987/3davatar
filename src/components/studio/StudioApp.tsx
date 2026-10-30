@@ -52,6 +52,20 @@ export function StudioApp() {
     void listAvatars().then(setSaved).catch(() => setSaved([]));
   }, [screen]);
 
+  // Reuse the most recently saved head fit as the starting fit for new photos.
+  // Opening a specific saved avatar still overrides these defaults in restore().
+  useEffect(() => {
+    let active = true;
+    void listAvatars().then((items) => {
+      if (!active || !items.length) return;
+      const current = useStudio.getState();
+      if (current.screen !== "home") return;
+      const latest = items[0];
+      current.patch({ headScale: latest.headScale, headY: latest.headY, headZ: latest.headZ });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
   async function takePhoto(file: Blob) {
     patch({
       screen: "studio",
