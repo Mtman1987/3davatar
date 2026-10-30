@@ -87,7 +87,7 @@ async def create_reconstruction(
         raise
 
     with _lock:
-        _jobs[job_id] = {"status": "queued", "message": "Photos accepted", "directory": str(job_dir)}
+        _jobs[job_id] = {"status": "queued", "message": "Photos accepted", "directory": str(job_dir), "log_path": str(job_dir / "pipeline.log"), "logs": []}
 
     threading.Thread(
         target=run_pipeline,
@@ -111,12 +111,34 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             "--config", str(PIPELINE_ROOT / "configs" / "default.yaml"),
             "--detail", os.environ.get("FACE_RECONSTRUCTION_DETAIL", "0"),
         ]
-        completed = subprocess.run(
-            command, cwd=PIPELINE_ROOT, env=env, capture_output=True,
-            text=True, timeout=1800, check=False,
-        )
-        if completed.returncode != 0:
-            raise RuntimeError((completed.stderr or completed.stdout)[-6000:])
+        log_path = Path(_jobs[job_id]["log_path"])
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w", encoding="utf-8", errors="replace") as log:
+            process = subprocess.Popen(
+                command, cwd=PIPELINE_ROOT, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            with _lock:
+                _jobs[job_id].update(status="running", message="Pipeline process started")
+            assert process.stdout is not None
+            for line in process.stdout:
+                clean = line.rstrip()
+                if not clean:
+                    continue
+                log.write(clean + "\\n")
+                log.flush()
+                with _lock:
+                    job = _jobs[job_id]
+                    lines = job.setdefault("logs", [])
+                    lines.append(clean[-1000:])
+                    del lines[:-80]
+                    job["message"] = clean[-500:]
+            return_code = process.wait(timeout=1800)
+        if return_code != 0:
+            with _lock:
+                diagnostic = "\\n".join(_jobs[job_id].get("logs", []))
+            raise RuntimeError("Pipeline exited with code " + str(return_code) + ". Last output:\\n" + diagnostic[-6000:])
         import json
         stage5_path = output_dir / "stage5_export_manifest.json"
         if not stage5_path.is_file():
@@ -178,7 +200,15 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             _jobs[job_id].update(status="complete", message="Native head geometry, ARKit morphs, rig, and texture assets exported")
     except Exception as exc:
         with _lock:
-            _jobs[job_id].update(status="failed", message=str(exc)[:6000])
+            job = _jobs.get(job_id, {})
+            log_path = Path(job.get("log_path", output_dir.parent / "pipeline.log"))
+            try:
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write("\\n[AvatarAce service error] " + repr(exc) + "\\n")
+            except OSError:
+                pass
+            job.update(status="failed", message=str(exc)[:6000])
+            _jobs[job_id] = job
 
 
 @app.get("/v1/reconstructions/{job_id}")
@@ -188,7 +218,7 @@ def get_reconstruction(job_id: str, x_face_reconstruction_token: str | None = He
         job = _jobs.get(job_id)
         if job is None:
             raise HTTPException(404, "Reconstruction job not found")
-        return {"id": job_id, "status": job["status"], "message": job["message"]}
+        return {"id": job_id, "status": job["status"], "message": job["message"], "logs": job.get("logs", [])}
 
 
 @app.get("/v1/reconstructions/{job_id}/assets/{asset_name}")
