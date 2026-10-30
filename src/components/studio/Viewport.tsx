@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
+import { ARKIT_BLENDSHAPE_NAMES, PRESETS, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
@@ -120,7 +120,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const loop = () => {
       frame=requestAnimationFrame(loop); const delta=clock.getDelta(); const loaded=modelRef.current; loaded?.mixer?.update(delta);
       const current=propsRef.current; const sound=current.sampleSound(); const tracking=current.sampleTracking?.();
-      const allWeights: Record<string,number> = {...(sound ?? {}),...(tracking ?? {}),...(current.manualMorphs ?? {})};
+      const presetWeights = current.preset === "captured" ? {} : PRESETS[current.preset];
+      const allWeights: Record<string,number> = {...presetWeights,...(sound ?? {}),...(tracking ?? {}),...(current.manualMorphs ?? {})};
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       renderer.render(scene,camera);
     };
