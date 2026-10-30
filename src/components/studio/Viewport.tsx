@@ -5,6 +5,7 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, PRESETS, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
+import { animateGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -127,7 +128,11 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       // explicitly as well as the body root so expressions never depend on
       // whether the generated attachment is discoverable in the body's tree.
       const generatedHead = reconstructedHeadRef.current;
-      if (generatedHead) applyMorphs(generatedHead,allWeights,current.expression);
+      if (generatedHead) {
+         applyMorphs(generatedHead,allWeights,current.expression);
+         const anatomy = generatedHead.getObjectByName("AvatarAceSubjectFittedAnatomy");
+         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta);
+       }
       renderer.render(scene,camera);
     };
     loop();setBooted(n=>n+1);
