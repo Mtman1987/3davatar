@@ -22,6 +22,7 @@ export type SavedAvatar = {
   headY: number;
   headZ: number;
   eyeDepth?: number;
+  mouthDepth?: number;
   expression: number;
 };
 
@@ -85,6 +86,7 @@ export async function listAvatars(): Promise<SavedAvatar[]> {
             headY: typeof row.headY === "number" && Number.isFinite(row.headY) ? row.headY : 0,
             headZ: typeof row.headZ === "number" && Number.isFinite(row.headZ) ? row.headZ : 0,
             eyeDepth: typeof row.eyeDepth === "number" && Number.isFinite(row.eyeDepth) ? row.eyeDepth : 0,
+            mouthDepth: typeof row.mouthDepth === "number" && Number.isFinite(row.mouthDepth) ? row.mouthDepth : 0,
             expression: typeof row.expression === "number" && Number.isFinite(row.expression) ? row.expression : 1,
           };
         })
