@@ -108,6 +108,7 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   upperLid.geometry.translate(0, -center.y, 0);
   upperLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.52);
   upperLid.userData.travel = lidTravel;
+  upperLid.userData.avatarSkinToneMultiplier = 0.84;
   upperLid.renderOrder = 5;
   eye.add(upperLid);
   const lowerShape = new THREE.Shape();
@@ -123,6 +124,7 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   lowerLid.geometry.translate(0, -center.y, 0);
   lowerLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.53);
   lowerLid.scale.y = 0.001;
+  lowerLid.userData.avatarSkinToneMultiplier = 0.92;
   lowerLid.renderOrder = 6;
   eye.add(lowerLid);
   eye.userData.upperBlinkLid = upperLid;
