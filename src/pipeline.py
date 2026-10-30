@@ -605,6 +605,20 @@ class FaceGeoPipeline:
         facial_landmarks_3d = (
             neutral_vertices[landmark_faces] * landmark_bary[..., None]
         ).sum(axis=1).astype(np.float32)
+        if (
+            facial_landmarks_3d.ndim != 2
+            or facial_landmarks_3d.shape[1] != 3
+            or facial_landmarks_3d.shape[0] != 478
+            or not np.isfinite(facial_landmarks_3d).all()
+        ):
+            raise RuntimeError(
+                "Subject-fitted MediaPipe landmark mapping must produce exactly "
+                f"478 finite 3D points; got {facial_landmarks_3d.shape} from {embedding_path}."
+            )
+        print(
+            f"[Stage 5] Prepared {len(facial_landmarks_3d)} subject-fitted 3D "
+            f"facial anchors from {embedding_path}."
+        )
 
         output_paths = self._export(
             vertices=neutral_vertices, faces=faces, detail_maps=detail_maps,
