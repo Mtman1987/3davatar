@@ -87,8 +87,8 @@ export function StudioApp() {
         if (result.message) patch({ statusText: result.message.slice(0, 180) });
       }
       if (result.status !== "complete") {
-        const diagnostics = result.logs?.slice(-12).join("\\n");
-        throw new Error([result.message || "The head generator could not complete this photo.", diagnostics].filter(Boolean).join("\\n\\n"));
+        const diagnostics = result.logs?.slice(-12).join("\n");
+        throw new Error([result.message || "The head generator could not complete this photo.", diagnostics].filter(Boolean).join("\n\n"));
       }
 
       const state = useStudio.getState();
