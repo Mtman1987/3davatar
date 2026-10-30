@@ -3,24 +3,46 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const serviceDir = join(root, "face-reconstruction-service");
 const port = process.env.FACE_RECONSTRUCTION_PORT || "8001";
 const base = "http://127.0.0.1:" + port;
+const siblingPipeline = resolve(root, "..", "Humanoid-Face-3D");
+const home = homedir();
+const pipelineRoot = process.env.FACE_PIPELINE_ROOT ||
+  (existsSync(join(siblingPipeline, "scripts", "run_pipeline.py")) ? siblingPipeline : root);
 
 function findPython() {
   if (process.env.FACE_PYTHON_BIN) return process.env.FACE_PYTHON_BIN;
-  const candidates = process.platform === "win32"
-    ? [join(root, ".venv", "Scripts", "python.exe"), join(root, "..", "Humanoid-Face-3D", ".venv", "Scripts", "python.exe")]
-    : [join(root, ".venv", "bin", "python"), join(root, "..", "Humanoid-Face-3D", ".venv", "bin", "python")];
-  return candidates.find((candidate) => existsSync(candidate)) || (process.platform === "win32" ? "python" : "python3");
+  const windows = process.platform === "win32";
+  const bin = windows ? ["Scripts", "python.exe"] : ["bin", "python"];
+  const candidates = [
+    join(root, ".venv", ...bin),
+    join(pipelineRoot, ".venv", ...bin),
+    join(siblingPipeline, ".venv", ...bin),
+    join(home, "Humanoid-Face-3D", ".venv", ...bin),
+    join(home, "AvatarAce-main-verified", "mediapipe-face-pipeline", ".venv", ...bin),
+    join(home, "AvatarAce-main-verified", ".venv", ...bin),
+  ].filter((candidate, index, all) => all.indexOf(candidate) === index);
+  const existing = candidates.find((candidate) => existsSync(candidate));
+  if (existing) {
+    console.log("[AvatarAce] Reusing existing Python environment: " + existing);
+    return existing;
+  }
+  if (process.env.PREFIX?.includes("com.termux")) {
+    throw new Error(
+      "No existing face-pipeline virtual environment found. Checked: " +
+      candidates.join(", ") +
+      ". Set FACE_PYTHON_BIN to the existing environment's Python executable. " +
+      "Refusing to use Termux system Python or compile NumPy/MediaPipe."
+    );
+  }
+  return windows ? "python" : "python3";
 }
 
-const siblingPipeline = resolve(root, "..", "Humanoid-Face-3D");
-const pipelineRoot = process.env.FACE_PIPELINE_ROOT ||
-  (existsSync(join(siblingPipeline, "scripts", "run_pipeline.py")) ? siblingPipeline : root);
 const modelDir = process.env.FACE_MODEL_DIR || join(pipelineRoot, "data", "flame_model");
 const python = findPython();
 const token = process.env.FACE_RECONSTRUCTION_TOKEN || randomBytes(32).toString("hex");
