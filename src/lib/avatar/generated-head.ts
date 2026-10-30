@@ -269,16 +269,25 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   const albedoPath = maps.albedo ?? maps.albedo_map ?? maps.albedo_texture ?? maps.projected_texture;
   const normalPath = maps.normal_map ?? maps.normal ?? maps.film_normal;
   const displacementPath = maps.displacement_16bit ?? maps.displacement_png ?? maps.displacement;
-  const [albedoMap, normalMap, displacementMap] = await Promise.all([
+  const roughnessPath = maps.roughness ?? maps.roughness_map ?? maps.roughness_base;
+  const aoPath = maps.cavity ?? maps.cavity_ao ?? maps.ao;
+  const [albedoMap, normalMap, displacementMap, roughnessMap, aoMap] = await Promise.all([
     loadTexture(albedoPath, true),
     loadTexture(normalPath, false),
     loadTexture(displacementPath, false),
+    loadTexture(roughnessPath, false),
+    loadTexture(aoPath, false),
   ]);
   if (albedoMap) material.map = albedoMap;
   if (normalMap) material.normalMap = normalMap;
   if (displacementMap) {
     material.displacementMap = displacementMap;
     material.displacementScale = 0.001;
+  }
+  if (roughnessMap) material.roughnessMap = roughnessMap;
+  if (aoMap) {
+    built.geometry.setAttribute("uv2", built.geometry.getAttribute("uv"));
+    material.aoMap = aoMap;
   }
 
   if (rig) {
