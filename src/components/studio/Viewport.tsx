@@ -95,6 +95,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loader.load(url,(gltf)=>{
       if(cancelled){disposeModel(gltf.scene);return;}
       const root=new THREE.Group();root.name=props.modelName || (props.modelUrl ? "FinishedCommission" : props.bodyAsset+"-base");root.add(gltf.scene);
+      if (!props.modelUrl && props.bodyAsset === "female") removeOriginalFemaleHead(root);
       root.updateMatrixWorld(true);
       const bounds=new THREE.Box3().setFromObject(root);
       if(bounds.isEmpty() || !Number.isFinite(bounds.min.y) || !Number.isFinite(bounds.max.y)){
@@ -277,6 +278,11 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
 
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
+    let ancestor: THREE.Object3D | null = mesh;
+    while (ancestor) {
+      if (ancestor.name === "AvatarAceReconstructedHead") return;
+      ancestor = ancestor.parent;
+    }
     if (!mesh.isMesh || excluded.test(mesh.name || "")) return;
     const sources = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const next = sources.map((source) => {
@@ -332,6 +338,56 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
       return material;
     });
     mesh.material = Array.isArray(mesh.material) ? next : next[0]!;
+  });
+}
+
+function removeOriginalFemaleHead(root: THREE.Object3D) {
+  // Female base GLB joint indices: head=103, jaw=104. Keep the neck
+  // transition intact; remove only triangles dominated by head/jaw weights.
+  const HEAD_JOINT = 103;
+  const JAW_JOINT = 104;
+  const MIN_SOURCE_Y = 1.385;
+  const MIN_COMBINED_WEIGHT = 0.55;
+
+  root.traverse((object) => {
+    const mesh = object as THREE.SkinnedMesh;
+    if (!mesh.isMesh || !mesh.geometry || !mesh.isSkinnedMesh) return;
+    const geometry = mesh.geometry;
+    const skinIndex = geometry.getAttribute("skinIndex");
+    const skinWeight = geometry.getAttribute("skinWeight");
+    const position = geometry.getAttribute("position");
+    if (!skinIndex || !skinWeight || !position) return;
+
+    const index = geometry.getIndex();
+    if (!index) return;
+    const kept: number[] = [];
+    let removed = 0;
+
+    for (let i = 0; i < index.count; i += 3) {
+      let combined = 0;
+      let centerY = 0;
+      for (let corner = 0; corner < 3; corner++) {
+        const vertex = index.getX(i + corner);
+        centerY += position.getY(vertex) / 3;
+        for (let slot = 0; slot < 4; slot++) {
+          const joint = skinIndex.getComponent(vertex, slot);
+          if (joint === HEAD_JOINT || joint === JAW_JOINT) {
+            combined += skinWeight.getComponent(vertex, slot) / 3;
+          }
+        }
+      }
+      if (centerY >= MIN_SOURCE_Y && combined >= MIN_COMBINED_WEIGHT) {
+        removed++;
+      } else {
+        kept.push(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+      }
+    }
+
+    if (removed > 0) {
+      geometry.setIndex(kept);
+      geometry.computeVertexNormals();
+      mesh.userData.avatarAceOriginalHeadTrianglesRemoved = removed;
+    }
   });
 }
 
