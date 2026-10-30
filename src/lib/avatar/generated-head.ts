@@ -263,6 +263,7 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
     mesh.name = "AvatarAceGeneratedHeadMesh";
     group.add(root);
     group.add(mesh);
+    group.updateMatrixWorld(true);
     mesh.bind(skeleton);
     mesh.morphTargetInfluences = morphs.blendshapes
       ? Object.keys(morphs.blendshapes).map(() => 0)
