@@ -13,6 +13,20 @@ function point(points: [number, number, number][], index: number): THREE.Vector3
   return new THREE.Vector3(value[0], value[1], value[2]);
 }
 
+function sampleContourY(points: THREE.Vector3[], x: number): number {
+  const sorted = [...points].sort((a, b) => a.x - b.x);
+  if (x <= sorted[0].x) return sorted[0].y;
+  if (x >= sorted[sorted.length - 1].x) return sorted[sorted.length - 1].y;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i], b = sorted[i + 1];
+    if (x >= a.x && x <= b.x) {
+      const t = (x - a.x) / Math.max(b.x - a.x, 1e-8);
+      return THREE.MathUtils.lerp(a.y, b.y, t);
+    }
+  }
+  return 0;
+}
+
 function makeEye(points: [number, number, number][], centerIndex: number, ring: number[], skin: THREE.Material, side: string, frontSign: number) {
   const eye = new THREE.Group();
   eye.name = "AvatarAceEye_" + side;
@@ -177,27 +191,33 @@ export function buildGeneratedFacialAnatomy(
   const toothDepth = Math.max(mouthWidth * 0.12, 0.003);
   const upperTeeth: THREE.Mesh[] = [];
   const lowerTeeth: THREE.Mesh[] = [];
+  // Fit each tooth to the actual upper/lower inner-lip curves from this
+  // generated face. This creates a curved dental arch unique to the subject.
+  const upperInnerArc = [191, 80, 81, 82, 13, 312, 311, 310, 415].map((i) => point(points, i));
+  const lowerInnerArc = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308].map((i) => point(points, i));
   for (let i = 0; i < 6; i++) {
     const x = (i - 2.5) * toothWidth * 0.91;
-    // Rounded enamel crowns read as teeth at this avatar scale; the previous
-    // flat boxes produced a single floating bar. Keep the same jaw-driven
-    // positions so speech animation remains unchanged.
+    const sampleX = mouthCenter.x + x;
+    const upperY = sampleContourY(upperInnerArc, sampleX) - mouthCenter.y;
+    const lowerY = sampleContourY(lowerInnerArc, sampleX) - mouthCenter.y;
     const crownGeometry = new THREE.SphereGeometry(1, 20, 14);
     const upper = new THREE.Mesh(crownGeometry, toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
     upper.renderOrder = 21;
-    upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.92);
+    upper.position.set(x, upperY - toothHeight * 0.16, cavity.position.z - frontSign * toothDepth * 0.92);
     upper.scale.set(toothWidth * 0.38, toothHeight * 0.52, toothDepth * 0.55);
     upper.userData.baseScaleY = upper.scale.y;
+    upper.userData.baseY = upper.position.y;
     mouth.add(upper);
     upperTeeth.push(upper);
 
     const lower = new THREE.Mesh(crownGeometry.clone(), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
     lower.renderOrder = 21;
-    lower.position.set(x, -neutralGap * 0.22 - toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.78);
+    lower.position.set(x, lowerY + toothHeight * 0.16, cavity.position.z - frontSign * toothDepth * 0.92);
     lower.scale.set(toothWidth * 0.38, toothHeight * 0.52, toothDepth * 0.55);
     lower.userData.baseScaleY = lower.scale.y;
+    lower.userData.baseY = lower.position.y;
     mouth.add(lower);
     lowerTeeth.push(lower);
   }
@@ -208,7 +228,8 @@ export function buildGeneratedFacialAnatomy(
   );
   tongue.name = "AvatarAceTongue";
   tongue.renderOrder = 22;
-  tongue.scale.set(1.25, 0.32, 0.34);
+  tongue.scale.set(1.25, 0.001, 0.34);
+  tongue.userData.baseScaleY = 0.32;
   // The tongue belongs behind the tooth rows, not on the visible front
   // plane where it can visually replace them.
   tongue.position.set(0, -neutralGap * 0.55, cavity.position.z - frontSign * toothDepth * 1.25);
@@ -320,17 +341,18 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   // fixed white strip at the start of a speech shape.
   const toothReveal = THREE.MathUtils.smoothstep(jaw, 0.06, 0.42);
   for (const tooth of upperTeeth ?? []) {
-    tooth.position.y = neutralGap * 0.22 + toothHeight * 0.30 + smile * cavityWidth * 0.025 + jawDrop * 0.12;
+    tooth.position.y = Number(tooth.userData.baseY ?? tooth.position.y) + smile * cavityWidth * 0.012 + jawDrop * 0.08;
     tooth.scale.y = Number(tooth.userData.baseScaleY ?? tooth.scale.y) * toothReveal;
   }
   for (const tooth of lowerTeeth ?? []) {
-    tooth.position.y = -neutralGap * 0.22 - toothHeight * 0.30 - jawDrop;
+    tooth.position.y = Number(tooth.userData.baseY ?? tooth.position.y) - jawDrop * 0.72;
     tooth.scale.y = Number(tooth.userData.baseScaleY ?? tooth.scale.y) * toothReveal;
   }
   if (tongue) {
+    const tongueReveal = THREE.MathUtils.smoothstep(Math.max(jaw, tongueOut), 0.08, 0.38);
     tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
     tongue.position.z = tongueBaseZ + tongueOut * cavityWidth * 0.22;
-    tongue.scale.y = 0.32 + tongueOut * 0.12;
+    tongue.scale.y = Number(tongue.userData.baseScaleY ?? 0.32) * tongueReveal;
   }
   for (const [index, corner] of (corners ?? []).entries()) {
     const side = index === 0 ? -1 : 1;
