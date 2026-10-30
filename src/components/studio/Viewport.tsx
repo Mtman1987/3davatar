@@ -409,36 +409,56 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
 
     const index = geometry.getIndex();
     const elementCount = index ? index.count : position.count;
+    const originalGroups = geometry.groups.map((group) => ({ ...group }));
+    const ranges = originalGroups.length
+      ? originalGroups
+      : [{ start: 0, count: elementCount, materialIndex: 0 }];
     const kept: number[] = [];
+    const rebuiltGroups: Array<{ start: number; count: number; materialIndex: number }> = [];
     let removed = 0;
 
-    for (let i = 0; i + 2 < elementCount; i += 3) {
-      let headJawWeight = 0;
-      for (let corner = 0; corner < 3; corner++) {
-        const vertex = index ? index.getX(i + corner) : i + corner;
-        for (let slot = 0; slot < 4; slot++) {
-          const joint = skinIndex.getComponent(vertex, slot);
-          if (joint === headIndex || joint === jawIndex) {
-            headJawWeight += skinWeight.getComponent(vertex, slot) / 3;
+    for (const group of ranges) {
+      const groupStart = Math.max(0, group.start);
+      const groupEnd = Math.min(elementCount, group.start + group.count);
+      const keptStart = kept.length;
+      for (let i = groupStart; i + 2 < groupEnd; i += 3) {
+        let headJawWeight = 0;
+        for (let corner = 0; corner < 3; corner++) {
+          const vertex = index ? index.getX(i + corner) : i + corner;
+          for (let slot = 0; slot < 4; slot++) {
+            const joint = skinIndex.getComponent(vertex, slot);
+            if (joint === headIndex || joint === jawIndex) {
+              headJawWeight += skinWeight.getComponent(vertex, slot) / 3;
+            }
           }
         }
-      }
 
-      // Use skinning influence rather than a hard-coded source-space Y plane:
-      // different mesh primitives can have different local transforms/origins.
-      if (headJawWeight >= 0.55) {
-        removed++;
-      } else {
-        kept.push(
-          index ? index.getX(i) : i,
-          index ? index.getX(i + 1) : i + 1,
-          index ? index.getX(i + 2) : i + 2,
-        );
+        // Use skinning influence rather than a hard-coded source-space Y plane:
+        // different mesh primitives can have different local transforms/origins.
+        if (headJawWeight >= 0.55) {
+          removed++;
+        } else {
+          kept.push(
+            index ? index.getX(i) : i,
+            index ? index.getX(i + 1) : i + 1,
+            index ? index.getX(i + 2) : i + 2,
+          );
+        }
+      }
+      const keptCount = kept.length - keptStart;
+      if (originalGroups.length && keptCount > 0) {
+        rebuiltGroups.push({ start: keptStart, count: keptCount, materialIndex: group.materialIndex });
       }
     }
 
     if (removed > 0) {
       geometry.setIndex(kept);
+      if (originalGroups.length) {
+        geometry.clearGroups();
+        for (const group of rebuiltGroups) {
+          geometry.addGroup(group.start, group.count, group.materialIndex);
+        }
+      }
       geometry.computeVertexNormals();
       mesh.userData.avatarAceOriginalHeadTrianglesRemoved = removed;
       totalRemoved += removed;
