@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { ARKIT_BLENDSHAPE_NAMES } from "./arkit.ts";
 import type { BuiltFace } from "./face-cache.ts";
 
 const OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
@@ -61,21 +60,6 @@ function ovalWeight(face: BuiltFace, x: number, y: number) {
     distance = Math.min(distance, Math.hypot(x - ax - t * dx, y - ay - t * dy));
   }
   return inside ? smooth(distance / 0.015) : 0;
-}
-
-/** Full vertex skin transform, so transferred morphs stay in the original bind space. */
-function posedMatrix(mesh: THREE.SkinnedMesh, index: number) {
-  const indices = mesh.geometry.getAttribute("skinIndex");
-  const weights = mesh.geometry.getAttribute("skinWeight");
-  const sum = new THREE.Matrix4(); sum.elements.fill(0);
-  const bone = new THREE.Matrix4();
-  for (let k = 0; k < 4; k++) {
-    const weight = weights.getComponent(index, k);
-    if (!weight) continue;
-    bone.fromArray(mesh.skeleton.boneMatrices!, indices.getComponent(index, k) * 16);
-    for (let j = 0; j < 16; j++) sum.elements[j]! += bone.elements[j]! * weight;
-  }
-  return mesh.matrixWorld.clone().multiply(mesh.bindMatrixInverse).multiply(sum).multiply(mesh.bindMatrix);
 }
 
 /** Measure the same front-facing, head-weighted width used by face transfer. */
