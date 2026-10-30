@@ -501,7 +501,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
       }
       const keptCount = kept.length - keptStart;
       if (originalGroups.length && keptCount > 0) {
-        rebuiltGroups.push({ start: keptStart, count: keptCount, materialIndex: group.materialIndex });
+        rebuiltGroups.push({ start: keptStart, count: keptCount, materialIndex: group.materialIndex ?? 0 });
       }
     }
 
