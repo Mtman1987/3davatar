@@ -174,13 +174,17 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             "neutral_base_obj": stage5.get("neutral_base_obj"),
             "blendshapes_json": stage5.get("blendshapes_json"),
             "armature_json": stage5.get("armature_json"),
-        }
-        optional_paths = {
             "facial_landmarks_json": stage5.get("facial_landmarks_json"),
         }
         missing = [key for key, value in required_paths.items() if not value or not Path(value).is_file()]
         if missing:
-            raise RuntimeError("Stage 5 did not produce required native head assets: " + ", ".join(missing))
+            raise RuntimeError(
+                "Stage 5 did not produce required native head assets: "
+                + ", ".join(missing)
+                + ". The reconstruction pipeline must pass the fitted 478-point "
+                  "facial_landmarks_3d array into Stage 5; refusing to publish an "
+                  "incomplete head manifest."
+            )
 
         # Stage 5 emits absolute paths. Publish every supported texture in the
         # job output root so the browser never receives server filesystem paths.
@@ -195,9 +199,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             return target.name
 
         assets: dict[str, str] = {}
-        for key, value in optional_paths.items():
-            if value:
-                assets[key] = publish_asset(value)
+        assets["facial_landmarks_json"] = publish_asset(required_paths["facial_landmarks_json"])
         for key, value in (stage5.get("detail_maps") or {}).items():
             if value:
                 try:
@@ -210,7 +212,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             "neutral_base_obj": publish_asset(required_paths["neutral_base_obj"]),
             "blendshapes_json": publish_asset(required_paths["blendshapes_json"]),
             "armature_json": publish_asset(required_paths["armature_json"]),
-            "facial_landmarks_json": assets.get("facial_landmarks_json"),
+            "facial_landmarks_json": assets["facial_landmarks_json"],
             "detail_maps": {key: value for key, value in assets.items() if key != "facial_landmarks_json"},
             "num_vertices": stage5.get("num_vertices"),
             "num_triangles": stage5.get("num_triangles"),
