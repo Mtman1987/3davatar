@@ -872,6 +872,10 @@ async function restore(item: SavedAvatar, takePhoto: (file: Blob) => Promise<voi
     modelUrl: hasFinishedModel ? item.modelUrl! : null,
     modelName: hasFinishedModel ? (item.modelName ?? "Saved finished commission") : null,
     generatedHeadUrl: item.generatedHeadUrl ?? null,
+    // Reopened saves with a generated head must re-enable the face controls.
+    // hasFace is runtime UI state and is not persisted in IndexedDB.
+    hasFace: !hasFinishedModel && Boolean(item.generatedHeadUrl),
+    preset: "captured",
     status: hasFinishedModel ? "working" : "idle",
     statusText: hasFinishedModel ? "Loading saved finished model…" : "",
     outfit: item.outfit,
