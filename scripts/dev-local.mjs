@@ -15,8 +15,18 @@ const home = homedir();
 const pipelineRoot = process.env.FACE_PIPELINE_ROOT ||
   (existsSync(join(siblingPipeline, "scripts", "run_pipeline.py")) ? siblingPipeline : root);
 
+const isTermux = process.env.PREFIX?.includes("com.termux") === true;
+const debianPython = join(home, "Humanoid-Face-3D", ".venv", "bin", "python");
+
 function findPython() {
   if (process.env.FACE_PYTHON_BIN) return process.env.FACE_PYTHON_BIN;
+  if (isTermux) {
+    if (!existsSync(join(home, "Humanoid-Face-3D", ".venv", "pyvenv.cfg"))) {
+      throw new Error("The existing Debian face-pipeline environment was not found at " + debianPython);
+    }
+    console.log("[AvatarAce] Using the existing Debian PRoot Python environment: " + debianPython);
+    return debianPython;
+  }
   const windows = process.platform === "win32";
   const bin = windows ? ["Scripts", "python.exe"] : ["bin", "python"];
   const candidates = [
@@ -110,11 +120,29 @@ async function waitForService() {
   return false;
 }
 
+function shellQuote(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
 async function main() {
   if (!existsSync(join(serviceDir, "app.py"))) throw new Error("Missing face-reconstruction-service/app.py.");
-  service = spawn(python, ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", port], {
-    cwd: serviceDir, env, stdio: "inherit",
-  });
+  if (isTermux) {
+    const forwarded = [
+      "FACE_PYTHON_BIN", "FACE_RECONSTRUCTION_URL", "FACE_RECONSTRUCTION_TOKEN",
+      "FACE_PIPELINE_ROOT", "FACE_MODEL_DIR", "FACE_WORK_ROOT",
+      "FACE_RECONSTRUCTION_SKIP_CLAY",
+    ].map((key) => key + "=" + shellQuote(env[key])).join(" ");
+    const command = "cd " + shellQuote(serviceDir) + " && exec /usr/bin/env " +
+      forwarded + " " + shellQuote(python) +
+      " -m uvicorn app:app --host 127.0.0.1 --port " + shellQuote(port);
+    service = spawn("proot-distro", ["login", "debian", "--", "/bin/bash", "-lc", command], {
+      cwd: root, env, stdio: "inherit",
+    });
+  } else {
+    service = spawn(python, ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", port], {
+      cwd: serviceDir, env, stdio: "inherit",
+    });
+  }
   const serviceExit = watch(service, "Python face service");
   if (!await waitForService()) {
     await serviceExit;
