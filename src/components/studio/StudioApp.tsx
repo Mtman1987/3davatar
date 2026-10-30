@@ -514,8 +514,9 @@ function Studio({
             <ChevronLeft className="size-5" />
           </button>
           <p className="rounded-full bg-surface/90 px-3 py-1 text-xs tracking-wide text-muted">Drag to turn</p>
-          <span className="size-11" />
+          <button type="button" className="pointer-events-auto rounded-full bg-surface/90 px-3 py-2 text-xs text-fg" onClick={() => void toggleFaceTracking()}>{trackingEnabled ? "Stop tracking" : "Track face"}</button>
         </div>
+        {trackingStatus ? <p className="absolute right-3 top-16 rounded-full bg-surface/90 px-3 py-1 text-xs text-muted" role="status">{trackingStatus}</p> : null}
         {state.status === "working" ? (
           <p className="absolute inset-x-0 bottom-4 text-center text-sm text-fg" role="status">
             {state.statusText}
