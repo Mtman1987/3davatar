@@ -5,3 +5,6 @@ dist/
 /HeadlessBody.glb
 /Meshy_AI_*.glb
 /neon-gamer-facial-v2.glb
+
+# Local generated photo-to-head jobs and uploads
+.local/

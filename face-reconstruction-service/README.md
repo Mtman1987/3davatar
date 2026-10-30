@@ -2,6 +2,21 @@
 
 This separate CPU service runs the repository's actual photo-to-head pipeline. PyTorch, OpenCV, MediaPipe, and FLAME are not shipped to the browser.
 
+## Local development (Termux / desktop)
+
+The normal `npm run dev` command starts both Vite and the local FastAPI adapter. It generates a per-run local token and passes it only to the server processes; the browser never receives it. No Fly or Oracle service is involved in local development.
+
+The launcher prefers the sibling `../Humanoid-Face-3D` checkout documented in the verified Termux workflow when it contains `scripts/run_pipeline.py`; otherwise it uses this repository's pipeline. It also prefers that checkout's `.venv` Python. Override with `FACE_PIPELINE_ROOT`, `FACE_PYTHON_BIN`, or `FACE_MODEL_DIR` when needed.
+
+Install the adapter's small web-server dependencies into the Python environment selected by the launcher if they are not already installed:
+
+```bash
+FACE_PYTHON_BIN=../Humanoid-Face-3D/.venv/bin/python
+"$FACE_PYTHON_BIN" -m pip install -r face-reconstruction-service/requirements.txt
+```
+
+On Termux, run those commands from the AvatarAce repository root. If the shell does not retain the assignment, use the explicit path on the pip command. The pipeline also needs the documented FLAME 2023 Open model and support assets in `data/flame_model/`, plus `models_cache/mediapipe/face_landmarker.task` inside the selected pipeline checkout. The local health endpoint lists each missing asset before photo submission. Generated job files are stored under `.local/face-reconstruction-jobs/` and are git-ignored.
+
 ## Runtime configuration
 
 - `FACE_RECONSTRUCTION_TOKEN`: required shared secret used by the app's server-side proxy and this service.

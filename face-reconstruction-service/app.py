@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -14,9 +15,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent
-PIPELINE_ROOT = Path(os.environ.get("FACE_PIPELINE_ROOT", "/opt/humanoid-face"))
-MODEL_DIR = Path(os.environ.get("FACE_MODEL_DIR", "/models"))
-WORK_ROOT = Path(os.environ.get("FACE_WORK_ROOT", "/var/lib/avatarace/jobs"))
+ROOT = Path(__file__).resolve().parents[1]
+PIPELINE_ROOT = Path(os.environ.get("FACE_PIPELINE_ROOT", str(ROOT)))
+MODEL_DIR = Path(os.environ.get("FACE_MODEL_DIR", str(ROOT / "data" / "flame_model")))
+WORK_ROOT = Path(os.environ.get("FACE_WORK_ROOT", str(ROOT / ".local" / "face-reconstruction-jobs")))
 API_TOKEN = os.environ.get("FACE_RECONSTRUCTION_TOKEN", "")
 MAX_UPLOAD_BYTES = int(os.environ.get("FACE_MAX_UPLOAD_BYTES", str(12 * 1024 * 1024)))
 MAX_PHOTOS = 5
@@ -41,10 +43,22 @@ def authorize(token: str | None) -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    required_assets = (
+        "flame2023_open.pkl",
+        "region_masks_open.npz",
+        "uv_layout_open.npz",
+        "mediapipe_embedding_open.npz",
+    )
+    missing_models = [name for name in required_assets if not (MODEL_DIR / name).is_file()]
+    landmarker = PIPELINE_ROOT / "models_cache" / "mediapipe" / "face_landmarker.task"
+    if not landmarker.is_file():
+        missing_models.append("models_cache/mediapipe/face_landmarker.task")
     return {
         "ok": True,
         "pipeline_available": (PIPELINE_ROOT / "scripts" / "run_pipeline.py").is_file(),
+        "model_dir": str(MODEL_DIR),
         "flame_model_available": (MODEL_DIR / "flame2023_open.pkl").is_file(),
+        "missing_models": missing_models,
         "version": app.version,
     }
 
@@ -55,6 +69,11 @@ async def create_reconstruction(
     x_face_reconstruction_token: str | None = Header(default=None),
 ) -> JobResponse:
     authorize(x_face_reconstruction_token)
+    readiness = health()
+    if not readiness["pipeline_available"]:
+        raise HTTPException(503, "FaceGeoPipeline runner is missing at " + str(PIPELINE_ROOT))
+    if readiness["missing_models"]:
+        raise HTTPException(503, "Photo-to-head model assets are missing: " + ", ".join(readiness["missing_models"]))
     if not 1 <= len(photos) <= MAX_PHOTOS:
         raise HTTPException(400, "Upload between one and five portrait photos")
 
@@ -105,7 +124,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
         env["FACE_MODEL_DIR"] = str(MODEL_DIR)
         env["FACE_RECONSTRUCTION_SKIP_CLAY"] = "1"
         command = [
-            "python", str(PIPELINE_ROOT / "scripts" / "run_pipeline.py"),
+            sys.executable, str(PIPELINE_ROOT / "scripts" / "run_pipeline.py"),
             "--photos", *map(str, photos),
             "--output", str(output_dir),
             "--config", str(PIPELINE_ROOT / "configs" / "default.yaml"),
