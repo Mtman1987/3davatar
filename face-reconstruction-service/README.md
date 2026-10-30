@@ -9,8 +9,9 @@ This separate CPU service runs the repository's actual photo-to-head pipeline. P
 - `FACE_PIPELINE_ROOT`: pipeline checkout (defaults to `/opt/humanoid-face`).
 - `FACE_WORK_ROOT`: persistent job output directory.
 - `FACE_MAX_UPLOAD_BYTES`: combined photo upload limit (defaults to 12 MiB).
+- `FACE_RECONSTRUCTION_DETAIL`: Stage 3 detail level passed to the proven pipeline runner (defaults to `0`, the verified Termux command; set higher values to request additional sculpt detail).
 
-The model files are deliberately excluded from the repository and container image. Mount only model files whose licenses permit the intended use and preserve required attribution in `THIRD_PARTY_NOTICES.md`.
+The licensed FLAME 2023 Open model and clean-room support assets are deliberately excluded from the repository and container image; mount them read-only at `/models`. The Docker build installs the CPU PyTorch runtime and downloads the same public MediaPipe Face Landmarker and selfie-segmentation task assets used by the verified Termux flow into the pipeline's `models_cache/mediapipe` directory. No InsightFace/MICA research-only models or Blender binary are required for the commercial MediaPipe/mean-identity path.
 
 The AvatarAce web app also needs these server-only environment variables:
 

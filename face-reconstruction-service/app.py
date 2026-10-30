@@ -103,12 +103,13 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
     try:
         env = os.environ.copy()
         env["FACE_MODEL_DIR"] = str(MODEL_DIR)
+        env["FACE_RECONSTRUCTION_SKIP_CLAY"] = "1"
         command = [
             "python", str(PIPELINE_ROOT / "scripts" / "run_pipeline.py"),
             "--photos", *map(str, photos),
             "--output", str(output_dir),
             "--config", str(PIPELINE_ROOT / "configs" / "default.yaml"),
-            "--detail", "60",
+            "--detail", os.environ.get("FACE_RECONSTRUCTION_DETAIL", "0"),
         ]
         completed = subprocess.run(
             command, cwd=PIPELINE_ROOT, env=env, capture_output=True,
@@ -121,6 +122,16 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
         if not stage5_path.is_file():
             raise RuntimeError("Pipeline did not produce its Stage 5 export manifest.")
         stage5 = json.loads(stage5_path.read_text())
+        pipeline_manifest_path = output_dir / "manifest.json"
+        if not pipeline_manifest_path.is_file():
+            raise RuntimeError("Pipeline did not produce its diagnostic manifest.")
+        pipeline_manifest = json.loads(pipeline_manifest_path.read_text())
+        stage_status = pipeline_manifest.get("stage_status") or {}
+        required_stages = ("stage6_7_texture", "stage8_pbr", "stage5_export")
+        failed_stages = [name for name in required_stages if stage_status.get(name) != "ok"]
+        if failed_stages:
+            details = "; ".join(name + ": " + str(stage_status.get(name, "missing status")) for name in failed_stages)
+            raise RuntimeError("Core reconstruction stages did not complete: " + details)
         required_paths = {
             "neutral_base_obj": stage5.get("neutral_base_obj"),
             "blendshapes_json": stage5.get("blendshapes_json"),
