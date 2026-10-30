@@ -309,18 +309,6 @@ function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expre
   root.traverse((obj)=>{
     const mesh=obj as THREE.Mesh;
     if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
-    const baseline = mesh.userData.connectedPhotoFaceBaseline as Record<string, number> | undefined;
-    if (baseline) {
-      // Restore the captured photo expression every frame before applying live drivers.
-      // This prevents sparse Audio2Face/tracking frames from leaving stale jaw/blink weights.
-      for (const name of ARKIT_BLENDSHAPE_NAMES) {
-        const index = mesh.morphTargetDictionary[name];
-        if (index !== undefined) {
-          const base = baseline[name] ?? 0;
-          mesh.morphTargetInfluences[index] = clamp(base * expression, 0, 1);
-        }
-      }
-    }
     for(const [name,value] of Object.entries(weights)){
       const index=mesh.morphTargetDictionary[name];
       if(index !== undefined) mesh.morphTargetInfluences[index]=clamp(value*expression,0,1);
