@@ -22,7 +22,7 @@ import numpy as np
 _MODEL = Path(os.environ.get(
     "FACE_MEDIAPIPE_MODEL_DIR",
     str(Path(__file__).resolve().parents[2] / "models_cache" / "mediapipe"),
-)) / "face_landmarker.task""
+)) / "face_landmarker.task"
 _URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/"
         "float16/latest/face_landmarker.task")
 
