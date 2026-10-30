@@ -12,8 +12,10 @@ const port = process.env.FACE_RECONSTRUCTION_PORT || "8001";
 const base = "http://127.0.0.1:" + port;
 const siblingPipeline = resolve(root, "..", "Humanoid-Face-3D");
 const home = homedir();
-const pipelineRoot = process.env.FACE_PIPELINE_ROOT ||
-  (existsSync(join(siblingPipeline, "scripts", "run_pipeline.py")) ? siblingPipeline : root);
+// Always execute the pipeline source shipped in this AvatarAce checkout.
+ // A sibling checkout may supply an existing Python environment or large model
+ // assets, but must never supply executable pipeline code.
+const pipelineRoot = process.env.FACE_PIPELINE_ROOT || root;
 
 const isTermux = process.env.PREFIX?.includes("com.termux") === true;
 const debianPython = join(home, "Humanoid-Face-3D", ".venv", "bin", "python");
@@ -53,7 +55,17 @@ function findPython() {
   return windows ? "python" : "python3";
 }
 
-const modelDir = process.env.FACE_MODEL_DIR || join(pipelineRoot, "data", "flame_model");
+const rootModelDir = join(root, "data", "flame_model");
+const siblingModelDir = join(siblingPipeline, "data", "flame_model");
+const modelDir = process.env.FACE_MODEL_DIR ||
+  (existsSync(rootModelDir) ? rootModelDir : siblingModelDir);
+const rootMpDir = join(root, "models_cache", "mediapipe");
+const siblingMpDir = join(siblingPipeline, "models_cache", "mediapipe");
+const hasMpModels = (dir) =>
+  existsSync(join(dir, "face_landmarker.task")) &&
+  existsSync(join(dir, "selfie_multiclass_256x256.tflite"));
+const mediaPipeModelDir = process.env.FACE_MEDIAPIPE_MODEL_DIR ||
+  (hasMpModels(rootMpDir) ? rootMpDir : siblingMpDir);
 const python = findPython();
 const token = process.env.FACE_RECONSTRUCTION_TOKEN || randomBytes(32).toString("hex");
 const env = {
@@ -63,6 +75,7 @@ const env = {
   FACE_RECONSTRUCTION_TOKEN: token,
   FACE_PIPELINE_ROOT: pipelineRoot,
   FACE_MODEL_DIR: modelDir,
+  FACE_MEDIAPIPE_MODEL_DIR: mediaPipeModelDir,
   FACE_WORK_ROOT: process.env.FACE_WORK_ROOT || join(root, ".local", "face-reconstruction-jobs"),
   FACE_RECONSTRUCTION_SKIP_CLAY: "1",
 };
@@ -105,6 +118,8 @@ async function waitForService() {
       if (response.ok) {
         const health = await response.json();
         console.log("[AvatarAce] Local face pipeline API ready at " + base);
+        console.log("[AvatarAce] Reconstruction source: " + env.FACE_PIPELINE_ROOT);
+        console.log("[AvatarAce] MediaPipe task assets: " + env.FACE_MEDIAPIPE_MODEL_DIR);
         if (!health.pipeline_available) console.warn("[AvatarAce] Pipeline runner missing under " + env.FACE_PIPELINE_ROOT);
         if (health.missing_models?.length) console.warn("[AvatarAce] Required model assets missing: " + health.missing_models.join(", "));
         return true;
@@ -129,7 +144,7 @@ async function main() {
   if (isTermux) {
     const forwarded = [
       "FACE_PYTHON_BIN", "FACE_RECONSTRUCTION_URL", "FACE_RECONSTRUCTION_TOKEN",
-      "FACE_PIPELINE_ROOT", "FACE_MODEL_DIR", "FACE_WORK_ROOT",
+      "FACE_PIPELINE_ROOT", "FACE_MODEL_DIR", "FACE_MEDIAPIPE_MODEL_DIR", "FACE_WORK_ROOT",
       "FACE_RECONSTRUCTION_SKIP_CLAY",
     ].map((key) => key + "=" + shellQuote(env[key])).join(" ");
     const command = "cd " + shellQuote(serviceDir) + " && exec /usr/bin/env " +
