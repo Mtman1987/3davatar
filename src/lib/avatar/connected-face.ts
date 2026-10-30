@@ -175,7 +175,6 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
         if (map?.userData.connectedFaceAtlas) map.dispose();
         material.dispose();
       }
-      item.mesh.geometry.dispose();
       item.mesh.geometry = item.geometry; item.mesh.material = item.material;
       item.mesh.morphTargetDictionary = item.dictionary; item.mesh.morphTargetInfluences = item.influences;
       delete item.mesh.userData.connectedPhotoFaceBaseline;
@@ -217,50 +216,15 @@ export function bindConnectedFace(root: THREE.Object3D, face: BuiltFace, options
         samples[i] = sample; blend[i] = weight; worldPositions[i] = world; eligibleZ.push(world.z);
       }
       if (!eligibleZ.length) continue;
-      // Sculpt onto the existing curved skin, rather than flattening it onto a
-      // photo plane (which exposed eyes and created a forehead shelf).
-      const geometry = source.clone();
-      const position = geometry.getAttribute("position") as THREE.BufferAttribute;
-      const originalMorphs = source.morphAttributes.position ?? [];
-      const namedMorphs = new Map<string, THREE.BufferAttribute>();
-      for (let m = 0; m < originalMorphs.length; m++) {
-        const name = Object.keys(mesh.morphTargetDictionary ?? {}).find(n => mesh.morphTargetDictionary![n] === m) ?? originalMorphs[m]!.name;
-        const attribute = new THREE.BufferAttribute(new Float32Array(count * 3), 3); attribute.name = name;
-        for (let i = 0; i < count; i++) for (let k = 0; k < 3; k++) attribute.setComponent(i, k, originalMorphs[m]!.getComponent(i, k) - (source.morphTargetsRelative ? 0 : sourcePosition.getComponent(i, k)));
-        namedMorphs.set(name, attribute);
-      }
-      for (const name of ARKIT_BLENDSHAPE_NAMES) if (!namedMorphs.has(name)) {
-        const attribute = new THREE.BufferAttribute(new Float32Array(count * 3), 3); attribute.name = name; namedMorphs.set(name, attribute);
-      }
-      for (let i = 0; i < count; i++) {
-        const sample = samples[i], world = worldPositions[i]; if (!sample || !world) continue;
-        const weight = blend[i]!;
-        const inverse = posedMatrix(mesh, i).invert();
-        const target = world.clone();
-        const relief = interpolate(face.positions, 3, 2, sample) * scale * 0.18;
-        // A single image is not a complete skull reconstruction. Keep original
-        // eye sockets/profile and use bounded photo relief, smoothly blended.
-        target.z += THREE.MathUtils.clamp(relief + options.headZ * 0.2, -0.012, 0.012) * weight;
-        const local = target.applyMatrix4(inverse); position.setXYZ(i, local.x, local.y, local.z);
-        const direction = new THREE.Matrix3().setFromMatrix4(inverse);
-        ARKIT_BLENDSHAPE_NAMES.forEach((name, m) => {
-          const delta = face.morphs[m]; if (!delta) return;
-          const localDelta = new THREE.Vector3(interpolate(delta, 3, 0, sample), interpolate(delta, 3, 1, sample), interpolate(delta, 3, 2, sample)).multiplyScalar(scale * weight).applyMatrix3(direction);
-          const attribute = namedMorphs.get(name)!;
-          attribute.setXYZ(i, attribute.getX(i) + localDelta.x, attribute.getY(i) + localDelta.y, attribute.getZ(i) + localDelta.z);
-        });
-        report.changedVertices++;
-      }
-      geometry.morphAttributes.position = [...namedMorphs.values()]; geometry.morphTargetsRelative = true;
-      // Retain authored smooth normals across original UV splits; recalculating
-      // each split independently produces faceted seams on these base assets.
-      geometry.computeBoundingBox(); geometry.computeBoundingSphere();
+      // Photo capture is appearance-only: keep the body's authored surface,
+      // UVs, skeleton, and facial morph targets unchanged. The landmark samples
+      // are used solely to bake the portrait into the existing UV atlas.
       const material = options.bakeTexture === false ? mesh.material : bakeAtlas(mesh, face, samples, blend);
       saved.push({ mesh, geometry: source, material: mesh.material, dictionary: mesh.morphTargetDictionary, influences: mesh.morphTargetInfluences });
-      mesh.geometry = geometry; mesh.material = material; mesh.updateMorphTargets();
-      mesh.userData.connectedPhotoFaceBaseline = Object.fromEntries(ARKIT_BLENDSHAPE_NAMES.map((name, i) => [name, face.influences[i] ?? 0]));
+      mesh.material = material;
+      report.changedVertices += samples.reduce((total, sample) => total + (sample ? 1 : 0), 0);
+      report.morphNames = Object.keys(mesh.morphTargetDictionary ?? {});
       report.meshes++; report.vertexCount += count; report.triangleCount += (source.index?.count ?? count) / 3;
-      report.morphNames = [...namedMorphs.keys()];
     }
     if (!report.changedVertices) throw new Error("The photo did not overlap the existing head. Reset the face fit and try a frontal portrait.");
     return { report, restore };
