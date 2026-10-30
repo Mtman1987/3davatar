@@ -209,7 +209,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
 
 
 @app.get("/v1/reconstructions/{job_id}")
-def get_reconstruction(job_id: str, x_face_reconstruction_token: str | None = Header(default=None)) -> dict[str, str]:
+def get_reconstruction(job_id: str, x_face_reconstruction_token: str | None = Header(default=None)) -> dict[str, Any]:
     authorize(x_face_reconstruction_token)
     with _lock:
         job = _jobs.get(job_id)
