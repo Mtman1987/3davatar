@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
-import { loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
+import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -203,6 +203,12 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         disposeModel(generatedHead);
         return;
       }
+      const currentProps = propsRef.current;
+      const face = getFaceCache()?.[currentProps.faceChoice];
+      const sampledTone = face ? sampleSkinTone(face.texture) : null;
+      const fallbackSwatch = SKINS.find((entry) => entry.id === currentProps.skin)?.swatch ?? SKINS[1].swatch;
+      applyGeneratedHeadSkinTone(generatedHead, sampledTone ?? new THREE.Color(fallbackSwatch));
+
       const neckBone = findNeckBone(loaded.root);
       const headBone = findExactHeadBone(loaded.root) ?? findHeadBone(loaded.root);
       const anchorBone = neckBone ?? headBone;
@@ -232,8 +238,10 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       // neck base overlaps the body's neck instead of hovering above it.
       // The studio sliders are applied here too (the legacy photo-face path
       // already consumed them, but the native generated-head path did not).
-      attachment.scale.setScalar(props.headScale);
-      attachment.position.set(0, -0.06 + props.headY, props.headZ);
+      // Use the latest fit values if sliders moved while the bundle was loading.
+      const latestFit = propsRef.current;
+      attachment.scale.setScalar(latestFit.headScale);
+      attachment.position.set(0, -0.06 + latestFit.headY, latestFit.headZ);
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
