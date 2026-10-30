@@ -38,18 +38,38 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   eyeball.scale.set(1, Math.max(0.62, height / Math.max(width, 0.001)), 0.72);
   eye.add(eyeball);
 
-  // A fitted lid surface follows this subject's measured eye opening. It is
-  // almost edge-on when open and closes over the eyeball during a blink.
-  const lidPoints = contour.map((p) => new THREE.Vector3(p.x, p.y, center.z + radius * 0.72));
-  const lidGeometry = new THREE.ShapeGeometry(polygon(lidPoints));
-  const lid = new THREE.Mesh(lidGeometry, skin.clone());
-  lid.name = "AvatarAceBlinkLid_" + side;
-  lid.position.set(0, center.y, 0);
-  lid.geometry.translate(0, -center.y, 0);
-  lid.scale.y = 0.015;
-  lid.renderOrder = 5;
-  eye.add(lid);
-  eye.userData.blinkLid = lid;
+  // Build separate upper and lower fitted lid patches. Each patch collapses
+  // to the measured lid margin when open, then advances across half the eye
+  // aperture when closing. Both sit in front of the eyeball, not behind it.
+  const upperArc = contour.filter((p) => p.y >= center.y).sort((a, b) => a.x - b.x);
+  const lowerArc = contour.filter((p) => p.y < center.y).sort((a, b) => a.x - b.x);
+  const left = contour.reduce((best, p) => p.x < best.x ? p : best, contour[0]);
+  const right = contour.reduce((best, p) => p.x > best.x ? p : best, contour[0]);
+  const makeLid = (arc: THREE.Vector3[], upper: boolean) => {
+    const shape = new THREE.Shape();
+    if (upper) {
+      shape.moveTo(left.x, center.y);
+      for (const p of arc) shape.lineTo(p.x, p.y);
+      shape.lineTo(right.x, center.y);
+    } else {
+      shape.moveTo(left.x, center.y);
+      for (const p of [...arc].reverse()) shape.lineTo(p.x, p.y);
+      shape.lineTo(right.x, center.y);
+    }
+    shape.closePath();
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 16), skin.clone());
+    mesh.name = "AvatarAce" + (upper ? "Upper" : "Lower") + "BlinkLid_" + side;
+    mesh.geometry.translate(0, -center.y, 0);
+    mesh.position.set(0, center.y, center.z + radius * 1.08);
+    mesh.scale.y = 0.015;
+    mesh.renderOrder = 5;
+    eye.add(mesh);
+    return mesh;
+  };
+  const upperLid = makeLid(upperArc, true);
+  const lowerLid = makeLid(lowerArc, false);
+  eye.userData.upperBlinkLid = upperLid;
+  eye.userData.lowerBlinkLid = lowerLid;
   eye.userData.eyeCenter = center;
   return eye;
 }
@@ -147,7 +167,7 @@ export function buildGeneratedFacialAnatomy(
   return root;
 }
 
-export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28) {
+export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28, jawBone?: THREE.Bone | null) {
   const data = root.userData.avatarAceAnatomy as { eyes: THREE.Group[]; mouth: THREE.Group } | undefined;
   if (!data) return;
   const clock = Number(root.userData.autoBlinkClock ?? 1.25) + Math.max(0, delta);
@@ -156,14 +176,22 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   const blinkWindow = 0.11;
   const autoBlink = cycle < blinkWindow ? Math.sin((cycle / blinkWindow) * Math.PI) : 0;
   for (const [index, eye] of data.eyes.entries()) {
-    const lid = eye.userData.blinkLid as THREE.Mesh | undefined;
-    if (!lid) continue;
+    const upperLid = eye.userData.upperBlinkLid as THREE.Mesh | undefined;
+    const lowerLid = eye.userData.lowerBlinkLid as THREE.Mesh | undefined;
+    if (!upperLid || !lowerLid) continue;
     const name = index === 0 ? "eyeBlinkLeft" : "eyeBlinkRight";
-    const target = Math.max(autoBlink, THREE.MathUtils.clamp(weights[name] ?? weights.eyeBlink ?? 0, 0, 1));
-    const current = lid.userData.blink ?? 0;
+    const squintName = index === 0 ? "eyeSquintLeft" : "eyeSquintRight";
+    const target = Math.max(
+      autoBlink,
+      THREE.MathUtils.clamp(weights[name] ?? weights.eyeBlink ?? 0, 0, 1),
+      THREE.MathUtils.clamp((weights[squintName] ?? 0) * 0.42, 0, 1),
+    );
+    const current = Number(upperLid.userData.blink ?? 0);
     const next = THREE.MathUtils.damp(current, target, 28, Math.max(0, delta));
-    lid.userData.blink = next;
-    lid.scale.y = 0.015 + next * 0.985;
+    upperLid.userData.blink = next;
+    lowerLid.userData.blink = next;
+    upperLid.scale.y = 0.015 + next * 0.985;
+    lowerLid.scale.y = 0.015 + next * 0.985;
   }
   const jaw = THREE.MathUtils.clamp(
     Math.max(weights.jawOpen ?? 0, weights.mouthOpen ?? 0, weights.viseme_aa ?? 0),
@@ -173,6 +201,11 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     Math.max(weights.mouthSmileLeft ?? 0, weights.mouthSmileRight ?? 0, weights.mouthSmile ?? 0, weights.smile ?? 0),
     0, 1,
   );
+  // The exported jaw joint is the skeletal counterpart to the jawOpen
+  // morph target. Keep its bind rotation neutral every frame, then apply a
+  // restrained anatomical rotation so the lower face and fitted jaw props
+  // move together without overpowering the subject-specific morph shape.
+  if (jawBone) jawBone.rotation.x = jaw * 0.045;
   const mouth = data.mouth;
   const cavity = mouth.userData.cavity as THREE.Mesh | undefined;
   const lowerTeeth = mouth.userData.lowerTeeth as THREE.Mesh[] | undefined;
