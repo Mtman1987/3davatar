@@ -47,10 +47,11 @@ export type GeneratedHeadArmature = {
 
 
 /**
- * Apply the same sampled photo albedo multiplier and matte surface response
- * used by the body GLB. Keeping the photo texture as the map preserves its
- * local complexion detail while the shared multiplier keeps both surfaces
- * in the same color pipeline.
+ * Preserve a generated head's authored albedo texture without multiplying a
+ * second sampled-photo tint over it. The body uses the sampled complexion as
+ * its material tint; a head with its own color map already contains that
+ * complexion, so its material tint must stay neutral white. Only untextured
+ * generated heads need the sampled tone as their base material color.
  */
 export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THREE.Color | null): void {
   root.traverse((object) => {
@@ -59,7 +60,11 @@ export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THR
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const source of materials) {
       if (!(source instanceof THREE.MeshStandardMaterial)) continue;
-      if (targetTone) source.color.copy(targetTone);
+      if (source.map) {
+        source.color.set(0xffffff);
+      } else if (targetTone) {
+        source.color.copy(targetTone);
+      }
       applyAvatarSkinSurface(source);
     }
   });
