@@ -180,7 +180,7 @@ export function buildGeneratedHeadSkeleton(
     return bone;
   });
   const byName = new Map(bones.map((bone) => [bone.name, bone]));
-  let root: THREE.Bone | null = null;
+  const roots: THREE.Bone[] = [];
   armature.joint_names.forEach((name, index) => {
     const parentName = armature.joints[name].parent;
     if (parentName) {
@@ -188,11 +188,11 @@ export function buildGeneratedHeadSkeleton(
       if (!parent) throw new Error("Generated head rig has unknown parent " + parentName + ".");
       parent.add(bones[index]);
     } else {
-      if (root) throw new Error("Generated head rig must have exactly one root joint.");
-      root = bones[index];
+      roots.push(bones[index]);
     }
   });
-  if (!root) throw new Error("Generated head rig has no root joint.");
+  if (roots.length !== 1) throw new Error("Generated head rig must have exactly one root joint.");
+  const root = roots[0];
   root.updateMatrixWorld(true);
   return { bones, skeleton: new THREE.Skeleton(bones), root };
 }
