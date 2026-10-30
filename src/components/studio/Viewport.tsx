@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
+import { loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -195,49 +196,30 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const headUrl = props.generatedHeadUrl;
     if (!loaded || props.modelUrl || !headUrl) return;
     let cancelled = false;
-    const loader = new GLTFLoader();
-    loader.load(headUrl, (gltf) => {
+    let attachment: THREE.Group | null = null;
+
+    void loadGeneratedHeadBundle(headUrl).then((generatedHead) => {
       if (cancelled || modelRef.current !== loaded) {
-        disposeModel(gltf.scene);
+        disposeModel(generatedHead);
         return;
       }
-
       const headBone = findExactHeadBone(loaded.root) ?? findHeadBone(loaded.root);
       if (!headBone) {
-        disposeModel(gltf.scene);
+        disposeModel(generatedHead);
         propsRef.current.onError?.("Generated head could not attach: the selected body has no head or skull bone.");
         return;
       }
 
-      // Keep the generator's scene graph intact. Its mesh topology, materials,
-      // textures, morph targets, skinning, and internal transforms remain native.
-      // The generator contract is that the GLB root is authored in head-bone
-      // local coordinates; optional attachment metadata adds only a parent
-      // transform and never rewrites generated vertex data.
-      const attachment = new THREE.Group();
-      attachment.name = "AvatarAceGeneratedHead";
-      const metadata = gltf.scene.userData?.avatarAceHead as
-        | { position?: number[]; quaternion?: number[]; scale?: number | number[] }
-        | undefined;
-      if (Array.isArray(metadata?.position) && metadata.position.length >= 3) {
-        attachment.position.fromArray(metadata.position);
-      }
-      if (Array.isArray(metadata?.quaternion) && metadata.quaternion.length >= 4) {
-        attachment.quaternion.fromArray(metadata.quaternion);
-      }
-      if (typeof metadata?.scale === "number") {
-        attachment.scale.setScalar(metadata.scale);
-      } else if (Array.isArray(metadata?.scale) && metadata.scale.length >= 3) {
-        attachment.scale.fromArray(metadata.scale);
-      }
-      attachment.add(gltf.scene);
+      // Preserve the generator's native mesh, UVs, PBR maps, ARKit morphs,
+      // facial bones, and skin weights. Only the group is parented to the body.
+      attachment = new THREE.Group();
+      attachment.name = "AvatarAceGeneratedHeadAttachment";
+      attachment.add(generatedHead);
       headBone.add(attachment);
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
 
-      // Report morph targets from both the body and the newly attached native
-      // head so existing expression controls can discover generator morphs.
       const morphNames = new Set<string>();
       loaded.root.traverse((object) => {
         const mesh = object as THREE.Mesh;
@@ -249,20 +231,19 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         morphNames: [...morphNames].sort(),
         animationNames: loaded.clips.map((clip) => clip.name || "Unnamed animation"),
       });
-    }, undefined, (error) => {
+    }).catch((error: unknown) => {
       if (cancelled) return;
-      const detail = error instanceof Error ? error.message : "Unknown GLB loading error";
-      propsRef.current.onError?.("Failed to load generated head " + headUrl + ": " + detail);
+      const detail = error instanceof Error ? error.message : "Unknown native head loading error";
+      propsRef.current.onError?.("Failed to load native generated head " + headUrl + ": " + detail);
     });
 
     return () => {
       cancelled = true;
-      const attachment = reconstructedHeadRef.current;
       if (attachment) {
         attachment.parent?.remove(attachment);
         disposeModel(attachment);
-        reconstructedHeadRef.current = null;
       }
+      if (reconstructedHeadRef.current === attachment) reconstructedHeadRef.current = null;
     };
   }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, booted]);
 
