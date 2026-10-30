@@ -55,7 +55,7 @@ export const getHeadReconstructionStatus = createServerFn({ method: "POST" })
       cache: "no-store",
     });
     if (!response.ok) throw new Error("Could not check reconstruction status (HTTP " + response.status + ").");
-    return await response.json() as { id: string; status: string; message: string };
+    return await response.json() as { id: string; status: string; message: string; logs?: string[] };
   });
 
 export const getGeneratedHeadAsset = createServerFn({ method: "POST" })
