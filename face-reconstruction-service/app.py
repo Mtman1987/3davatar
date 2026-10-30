@@ -116,12 +116,45 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
         )
         if completed.returncode != 0:
             raise RuntimeError((completed.stderr or completed.stdout)[-6000:])
-        required = ["head_mesh.obj", "blendshapes_arkit52.json"]
-        missing = [name for name in required if not (output_dir / name).is_file()]
+        import json
+        stage5_path = output_dir / "stage5_export_manifest.json"
+        if not stage5_path.is_file():
+            raise RuntimeError("Pipeline did not produce its Stage 5 export manifest.")
+        stage5 = json.loads(stage5_path.read_text())
+        required_paths = {
+            "neutral_base_obj": stage5.get("neutral_base_obj"),
+            "blendshapes_json": stage5.get("blendshapes_json"),
+            "armature_json": stage5.get("armature_json"),
+        }
+        missing = [key for key, value in required_paths.items() if not value or not Path(value).is_file()]
         if missing:
-            raise RuntimeError("Pipeline did not produce required assets: " + ", ".join(missing))
+            raise RuntimeError("Stage 5 did not produce required native head assets: " + ", ".join(missing))
+
+        # Stage 5 emits absolute server paths. Publish a browser-safe manifest
+        # with relative filenames and keep every asset inside this job directory.
+        assets: dict[str, str] = {}
+        for key, value in (stage5.get("detail_maps") or {}).items():
+            if not value:
+                continue
+            source = Path(value).resolve()
+            if source.is_file() and source.parent == output_dir.resolve():
+                assets[key] = source.name
+        browser_manifest = {
+            "version": "1.0",
+            "status": "success",
+            "neutral_base_obj": Path(required_paths["neutral_base_obj"]).name,
+            "blendshapes_json": Path(required_paths["blendshapes_json"]).name,
+            "armature_json": Path(required_paths["armature_json"]).name,
+            "detail_maps": assets,
+            "num_vertices": stage5.get("num_vertices"),
+            "num_triangles": stage5.get("num_triangles"),
+            "arkit_blendshapes_count": stage5.get("arkit_blendshapes_count"),
+            "units": "millimeters",
+            "attachment": {"joint": "head", "coordinate_space": "generator"},
+        }
+        (output_dir / "avatarace_head_manifest.json").write_text(json.dumps(browser_manifest, indent=2))
         with _lock:
-            _jobs[job_id].update(status="complete", message="Geometry and facial-shape assets exported")
+            _jobs[job_id].update(status="complete", message="Native head geometry, ARKit morphs, rig, and texture assets exported")
     except Exception as exc:
         with _lock:
             _jobs[job_id].update(status="failed", message=str(exc)[:6000])
