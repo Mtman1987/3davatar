@@ -131,7 +131,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       if (generatedHead) {
          applyMorphs(generatedHead,allWeights,current.expression);
          const anatomy = generatedHead.getObjectByName("AvatarAceSubjectFittedAnatomy");
-         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta, current.blinkSpeed ?? 0.28);
+         const jawBone = generatedHead.getObjectByName("jaw") as THREE.Bone | null;
+         if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta, current.blinkSpeed ?? 0.28, jawBone);
        }
       renderer.render(scene,camera);
     };
