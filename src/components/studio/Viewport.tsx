@@ -57,7 +57,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     };
     placeCamera();
     const pointers = new Map<number, {x:number;y:number}>();
-    let lastPinch = 0, lastX = 0, lastY = 0;
+    let lastX = 0, lastY = 0;
     const syncOrbitFromCamera = () => {
       const offset = camera.position.clone().sub(target);
       radius = Math.max(offset.length(), 0.08);
@@ -68,7 +68,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     const onDown = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      lastX = e.clientX; lastY = e.clientY; lastPinch = 0;
+      lastX = e.clientX; lastY = e.clientY;
     };
     const onMove = (e: PointerEvent) => {
       const previous = pointers.get(e.pointerId);
@@ -94,7 +94,6 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
         target.addScaledVector(cameraRight, -dx * worldUnitsPerPixel);
         target.addScaledVector(cameraUp, dy * worldUnitsPerPixel);
-        lastPinch = newDistance;
         placeCamera();
         return;
       }
@@ -105,7 +104,6 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     };
     const onUp = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
-      lastPinch = 0;
       const remaining = [...pointers.values()][0];
       if (remaining) { lastX = remaining.x; lastY = remaining.y; }
     };
