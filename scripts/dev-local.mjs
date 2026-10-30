@@ -18,6 +18,10 @@ function findPython() {
   return candidates.find((candidate) => existsSync(candidate)) || (process.platform === "win32" ? "python" : "python3");
 }
 
+const siblingPipeline = resolve(root, "..", "Humanoid-Face-3D");
+const pipelineRoot = process.env.FACE_PIPELINE_ROOT ||
+  (existsSync(join(siblingPipeline, "scripts", "run_pipeline.py")) ? siblingPipeline : root);
+const modelDir = process.env.FACE_MODEL_DIR || join(pipelineRoot, "data", "flame_model");
 const python = findPython();
 const token = process.env.FACE_RECONSTRUCTION_TOKEN || randomBytes(32).toString("hex");
 const env = {
@@ -25,8 +29,8 @@ const env = {
   FACE_PYTHON_BIN: python,
   FACE_RECONSTRUCTION_URL: base,
   FACE_RECONSTRUCTION_TOKEN: token,
-  FACE_PIPELINE_ROOT: process.env.FACE_PIPELINE_ROOT || root,
-  FACE_MODEL_DIR: process.env.FACE_MODEL_DIR || join(root, "data", "flame_model"),
+  FACE_PIPELINE_ROOT: pipelineRoot,
+  FACE_MODEL_DIR: modelDir,
   FACE_WORK_ROOT: process.env.FACE_WORK_ROOT || join(root, ".local", "face-reconstruction-jobs"),
   FACE_RECONSTRUCTION_SKIP_CLAY: "1",
 };
