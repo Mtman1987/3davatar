@@ -287,16 +287,24 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     // One shared calibration offset keeps both eyes seated consistently.
     // Negative values recess them into the head; positive values move them out.
     eye.position.z = frontSign * THREE.MathUtils.clamp(eyeDepthOffset, -0.04, 0.04);
+    const side = index === 0 ? "Left" : "Right";
+    // Rotate the fitted eyeball/iris group itself, so gaze works on the
+    // generated anatomy even when the source head has no eye-look morphs.
+    const lookX = THREE.MathUtils.clamp((weights["eyeLookDown" + side] ?? 0) - (weights["eyeLookUp" + side] ?? 0), -1, 1);
+    const lookY = THREE.MathUtils.clamp((weights["eyeLookIn" + side] ?? 0) - (weights["eyeLookOut" + side] ?? 0), -1, 1);
+    eye.rotation.x = THREE.MathUtils.damp(eye.rotation.x, lookX * 0.16, 12, Math.max(0, delta));
+    eye.rotation.y = THREE.MathUtils.damp(eye.rotation.y, lookY * 0.2, 12, Math.max(0, delta));
     const upperLid = eye.userData.upperBlinkLid as THREE.Mesh | undefined;
     const lowerLid = eye.userData.lowerBlinkLid as THREE.Mesh | undefined;
     if (!upperLid || !lowerLid) continue;
-    const name = index === 0 ? "eyeBlinkLeft" : "eyeBlinkRight";
-    const squintName = index === 0 ? "eyeSquintLeft" : "eyeSquintRight";
+    const name = "eyeBlink" + side;
+    const squintName = "eyeSquint" + side;
     const target = Math.max(
       autoBlink,
       THREE.MathUtils.clamp(weights[name] ?? weights.eyeBlink ?? 0, 0, 1),
       THREE.MathUtils.clamp((weights[squintName] ?? 0) * 0.42, 0, 1),
     );
+    const wide = THREE.MathUtils.clamp(weights["eyeWide" + side] ?? 0, 0, 1);
     const current = Number(upperLid.userData.blink ?? 0);
     const next = THREE.MathUtils.damp(current, target, 28, Math.max(0, delta));
     upperLid.userData.blink = next;
@@ -307,7 +315,7 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     const lidHeight = Number(eye.userData.lidHeight ?? 0);
     upperLid.scale.y = 1;
     const travel = Number(upperLid.userData.travel ?? lidHeight * 1.45);
-    upperLid.position.y = Number(eye.userData.eyeCenter instanceof THREE.Vector3 ? eye.userData.eyeCenter.y : 0) - travel * next;
+    upperLid.position.y = Number(eye.userData.eyeCenter instanceof THREE.Vector3 ? eye.userData.eyeCenter.y : 0) - travel * (next - wide * 0.12);
     lowerLid.scale.y = 0.001 + next * 0.12;
   }
   const jaw = THREE.MathUtils.clamp(
