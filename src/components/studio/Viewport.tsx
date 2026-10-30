@@ -675,6 +675,9 @@ function disposeFaceMesh(mesh: THREE.Mesh) {
 }
 
 function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expression: number) {
+  // Older or partially restored saves may not contain a valid expression
+  // strength. Never let an undefined/NaN value poison every live morph weight.
+  const strength = Number.isFinite(expression) ? expression : 1;
   root.traverse((obj)=>{
     const mesh=obj as THREE.Mesh;
     if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
@@ -687,13 +690,13 @@ function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expre
         const index = mesh.morphTargetDictionary[name];
         if (index !== undefined) {
           const base = baseline?.[index] ?? 0;
-          mesh.morphTargetInfluences[index] = clamp(base * expression, 0, 1);
+          mesh.morphTargetInfluences[index] = clamp(base * strength, 0, 1);
         }
       }
     }
     for(const [name,value] of Object.entries(weights)){
       const index=mesh.morphTargetDictionary[name];
-      if(index !== undefined) mesh.morphTargetInfluences[index]=clamp(value*expression,0,1);
+      if(index !== undefined) mesh.morphTargetInfluences[index]=clamp(value*strength,0,1);
     }
   });
 }
