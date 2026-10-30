@@ -130,6 +130,7 @@ export function buildGeneratedFacialAnatomy(
   const mouth = new THREE.Group();
   mouth.name = "AvatarAceArticulatedMouth";
   mouth.position.copy(mouthCenter);
+  mouth.userData.baseZ = mouth.position.z;
 
   // Build a real dark opening with a non-zero neutral aperture. Scaling this
   // cavity alone lets the mouth visibly open even when the source photo has
@@ -216,7 +217,7 @@ export function buildGeneratedFacialAnatomy(
   return root;
 }
 
-export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28, jawBone?: THREE.Bone | null, eyeDepthOffset = 0) {
+export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Record<string, number>, delta: number, blinkSpeed = 0.28, jawBone?: THREE.Bone | null, eyeDepthOffset = 0, mouthDepthOffset = 0) {
   const data = root.userData.avatarAceAnatomy as { eyes: THREE.Group[]; mouth: THREE.Group } | undefined;
   if (!data) return;
   const clock = Number(root.userData.autoBlinkClock ?? 1.25) + Math.max(0, delta);
@@ -265,6 +266,7 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   // move together without overpowering the subject-specific morph shape.
   if (jawBone) jawBone.rotation.x = jaw * 0.045;
   const mouth = data.mouth;
+  mouth.position.z = Number(mouth.userData.baseZ ?? mouth.position.z) + frontSign * THREE.MathUtils.clamp(mouthDepthOffset, -0.04, 0.04);
   const cavity = mouth.userData.cavity as THREE.Mesh | undefined;
   const lowerTeeth = mouth.userData.lowerTeeth as THREE.Mesh[] | undefined;
   const upperTeeth = mouth.userData.upperTeeth as THREE.Mesh[] | undefined;
