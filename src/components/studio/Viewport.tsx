@@ -166,31 +166,28 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
 
-      const worldBounds = new THREE.Box3().setFromObject(gltf.scene);
-      if (worldBounds.isEmpty()) {
+      const localBounds = new THREE.Box3();
+      const inverseAttachmentWorld = attachment.matrixWorld.clone().invert();
+      gltf.scene.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.geometry) return;
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        const geometryBounds = mesh.geometry.boundingBox;
+        if (!geometryBounds) return;
+        const meshToAttachment = inverseAttachmentWorld.clone().multiply(mesh.matrixWorld);
+        localBounds.union(geometryBounds.clone().applyMatrix4(meshToAttachment));
+      });
+      if (localBounds.isEmpty()) {
         headBone.remove(attachment);
         disposeModel(attachment);
         propsRef.current.onError?.("Reconstructed head GLB contains no visible geometry.");
         return;
       }
 
-      const localBounds = new THREE.Box3();
-      const corner = new THREE.Vector3();
-      for (let x = 0; x <= 1; x++) {
-        for (let y = 0; y <= 1; y++) {
-          for (let z = 0; z <= 1; z++) {
-            corner.set(
-              x ? worldBounds.max.x : worldBounds.min.x,
-              y ? worldBounds.max.y : worldBounds.min.y,
-              z ? worldBounds.max.z : worldBounds.min.z,
-            );
-            localBounds.expandByPoint(attachment.worldToLocal(corner.clone()));
-          }
-        }
-      }
-
-      // Seat the reconstructed head at the head-bone origin without changing
-      // the GLB's internal mesh, material, texture, or scale.
+      // Bounds are now expressed in attachment-local coordinates, even when
+      // the rig bone or exported GLB scene has a rotation or scale.
+      // Seat the head at the bone origin without altering its internal mesh,
+      // material, texture, or scale.
       const center = localBounds.getCenter(new THREE.Vector3());
       attachment.position.set(-center.x, -localBounds.min.y, -center.z);
       attachment.updateMatrixWorld(true);
