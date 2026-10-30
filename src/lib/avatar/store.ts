@@ -3,7 +3,7 @@ import type { BodyAssetId, FaceChoice, HairId, OutfitId, Panel, Preset, Screen, 
 
 export type TalkPhase = "off" | "gen" | "play" | "mic";
 type StudioState = {
-  screen: Screen; panel: Panel; bodyAsset: BodyAssetId; modelUrl: string | null; modelName: string | null;
+  screen: Screen; panel: Panel; bodyAsset: BodyAssetId; modelUrl: string | null; modelName: string | null; generatedHeadUrl: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; expression: number;
   status: "idle" | "working" | "ready" | "error"; statusText: string; error: string | null;
@@ -12,7 +12,7 @@ type StudioState = {
   patch: (partial: Partial<StudioState>) => void;
 };
 export const useStudio = create<StudioState>((set) => ({
-  screen: "home", panel: "body", bodyAsset: "male", modelUrl: null, modelName: null,
+  screen: "home", panel: "body", bodyAsset: "male", modelUrl: null, modelName: null, generatedHeadUrl: null,
   outfit: "hoodie", hair: "short", skin: "sand", faceChoice: "standard", preset: "captured",
   headScale: 1, headY: 0, headZ: 0, expression: 1, status: "idle", statusText: "", error: null,
   hasFace: false, faceRev: 0, photoPreview: null, talk: "off", talkNote: null,

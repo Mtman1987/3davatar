@@ -104,9 +104,11 @@ def synthesize_canonical_arkit_deltas(
     """
     n_verts = len(neutral_vertices)
     masks = get_anatomical_region_weights(neutral_vertices)
-    x = neutral_vertices[:, 0]
-    y = neutral_vertices[:, 1]
-    z = neutral_vertices[:, 2]
+    # FLAME neutral geometry is in metres. Facial masks below use millimetre
+    # anatomical thresholds, while exported deltas must remain in mesh units.
+    x = neutral_vertices[:, 0] * 1000.0
+    y = neutral_vertices[:, 1] * 1000.0
+    z = neutral_vertices[:, 2] * 1000.0
 
     y_min, y_max = float(np.min(y)), float(np.max(y))
     z_min, z_max = float(np.min(z)), float(np.max(z))
@@ -115,8 +117,8 @@ def synthesize_canonical_arkit_deltas(
 
     deltas: Dict[str, np.ndarray] = {}
 
-    # Standard displacement amplitude in millimeters (scaled to mesh units)
-    amp = 8.0 * scale_factor
+    # Standard displacement amplitude is 8 mm, converted to FLAME metres.
+    amp = 0.008 * scale_factor
 
     for name in ARKIT_52_NAMES:
         d = np.zeros((n_verts, 3), dtype=np.float32)
@@ -257,7 +259,7 @@ def transfer_blendshapes_deformation(
 def export_blendshapes_json(
     blendshapes: Dict[str, np.ndarray],
     output_path: Union[str, Path],
-    units: str = "millimeters"
+    units: str = "meters"
 ) -> str:
     """
     Exports the 52 ARKit blendshapes to standardized JSON schema.

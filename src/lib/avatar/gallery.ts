@@ -12,6 +12,8 @@ export type SavedAvatar = {
   /** Preserve the exact finished GLB when saving/reopening a commission. */
   modelUrl?: string | null;
   modelName?: string | null;
+  /** URL of the independently generated, native head GLB. */
+  generatedHeadUrl?: string | null;
   outfit: OutfitId;
   hair: HairId;
   skin: SkinId;
@@ -73,6 +75,7 @@ export async function listAvatars(): Promise<SavedAvatar[]> {
             body: typeof row.body === "string" ? row.body : undefined,
             modelUrl: typeof row.modelUrl === "string" && row.modelUrl.startsWith("/models/") ? row.modelUrl : null,
             modelName: typeof row.modelName === "string" ? row.modelName : null,
+            generatedHeadUrl: typeof row.generatedHeadUrl === "string" ? row.generatedHeadUrl : null,
             outfit: allowed(row.outfit, ["tee", "hoodie", "jacket", "dress", "layers"] as const, "hoodie"),
             hair: allowed(row.hair, ["none", "short", "long"] as const, "short"),
             skin: allowed(row.skin, ["porcelain", "sand", "amber", "bronze", "deep"] as const, "sand"),

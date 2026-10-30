@@ -4,12 +4,13 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
+import { loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
 type Props = {
-  bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null;
+  bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null; generatedHeadUrl?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
@@ -27,6 +28,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
   const modelRef = useRef<LoadedModel | null>(null);
   const faceMeshRef = useRef<THREE.Mesh | null>(null);
   const reconstructedHeadRef = useRef<THREE.Group | null>(null);
+  const syncOrbitRef = useRef<(() => void) | null>(null);
   const [booted, setBooted] = useState(0);
 
   useImperativeHandle(ref, () => ({
@@ -65,6 +67,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       pitch = clamp(Math.acos(clamp(direction.y, -1, 1)), 0.15, Math.PI - 0.15);
       yaw = Math.atan2(direction.x, direction.z);
     };
+    syncOrbitRef.current = syncOrbitFromCamera;
     const onDown = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -127,7 +130,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       canvas.removeEventListener("pointerdown",onDown);canvas.removeEventListener("pointermove",onMove);canvas.removeEventListener("pointerup",onUp);canvas.removeEventListener("pointercancel",onUp);
       if(modelRef.current){scene.remove(modelRef.current.root);disposeModel(modelRef.current.root);modelRef.current.mixer?.stopAllAction();modelRef.current=null;}
       ground.geometry.dispose();(ground.material as THREE.Material).dispose();renderer.dispose();canvas.remove();
-      rendererRef.current=null;sceneRef.current=null;cameraRef.current=null;
+      syncOrbitRef.current=null;rendererRef.current=null;sceneRef.current=null;cameraRef.current=null;
     };
   }, []);
 
@@ -141,7 +144,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loader.load(url,(gltf)=>{
       if(cancelled){disposeModel(gltf.scene);return;}
       const root=new THREE.Group();root.name=props.modelName || (props.modelUrl ? "FinishedCommission" : props.bodyAsset+"-base");root.add(gltf.scene);
-      if (!props.modelUrl && props.bodyAsset === "female") {
+      if (!props.modelUrl && (props.bodyAsset === "female" || props.generatedHeadUrl)) {
         const removal = removeOriginalFemaleHead(root);
         if (removal.eligibleMeshes === 0 || removal.removedTriangles === 0) {
           propsRef.current.onError?.(
@@ -173,7 +176,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       camera.position.set(target.x+0.08,target.y+0.04,fitDistance);camera.lookAt(target);
       // Keep the orbit controller in sync with the fitted camera so the first
       // gesture continues from the visible pose instead of snapping to defaults.
-      syncOrbitFromCamera();
+      syncOrbitRef.current?.();
       const clips=gltf.animations ?? [];const mixer=clips.length?new THREE.AnimationMixer(root):null;
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
@@ -186,77 +189,63 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       propsRef.current.onError?.("Failed to load required model "+url+": "+detail);
     });
     return ()=>{cancelled=true;};
-  },[props.modelUrl,props.bodyAsset,props.modelName]);
+  },[props.modelUrl,props.bodyAsset,props.modelName,props.generatedHeadUrl]);
 
   useEffect(() => {
     const loaded = modelRef.current;
-    if (!loaded || props.modelUrl || props.bodyAsset !== "female") return;
+    const headUrl = props.generatedHeadUrl;
+    if (!loaded || props.modelUrl || !headUrl) return;
     let cancelled = false;
-    const loader = new GLTFLoader();
-    loader.load("/models/reconstructed/first-face.glb", (gltf) => {
+    let attachment: THREE.Group | null = null;
+
+    void loadGeneratedHeadBundle(headUrl).then((generatedHead) => {
       if (cancelled || modelRef.current !== loaded) {
-        disposeModel(gltf.scene);
+        disposeModel(generatedHead);
         return;
       }
-      const headBone = findExactHeadBone(loaded.root);
+      const headBone = findExactHeadBone(loaded.root) ?? findHeadBone(loaded.root);
       if (!headBone) {
-        disposeModel(gltf.scene);
-        propsRef.current.onError?.("Reconstructed head could not attach: female body has no exact head bone.");
+        disposeModel(generatedHead);
+        propsRef.current.onError?.("Generated head could not attach: the selected body has no head or skull bone.");
         return;
       }
 
-      // Attach first, then measure in the attachment's own coordinate frame.
-      // Box3.setFromObject reports world-space bounds; using those values as
-      // GLTF-root local offsets breaks when the exported scene has transforms.
-      const attachment = new THREE.Group();
-      attachment.name = "AvatarAceReconstructedHead";
-      attachment.add(gltf.scene);
+      // Preserve the generator's native mesh, UVs, PBR maps, ARKit morphs,
+      // facial bones, and skin weights. Only the group is parented to the body.
+      attachment = new THREE.Group();
+      attachment.name = "AvatarAceGeneratedHeadAttachment";
+      attachment.add(generatedHead);
       headBone.add(attachment);
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
-
-      const localBounds = new THREE.Box3();
-      const inverseAttachmentWorld = attachment.matrixWorld.clone().invert();
-      gltf.scene.traverse((object) => {
-        const mesh = object as THREE.Mesh;
-        if (!mesh.isMesh || !mesh.geometry) return;
-        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-        const geometryBounds = mesh.geometry.boundingBox;
-        if (!geometryBounds) return;
-        const meshToAttachment = inverseAttachmentWorld.clone().multiply(mesh.matrixWorld);
-        localBounds.union(geometryBounds.clone().applyMatrix4(meshToAttachment));
-      });
-      if (localBounds.isEmpty()) {
-        headBone.remove(attachment);
-        disposeModel(attachment);
-        propsRef.current.onError?.("Reconstructed head GLB contains no visible geometry.");
-        return;
-      }
-
-      // Bounds are now expressed in attachment-local coordinates, even when
-      // the rig bone or exported GLB scene has a rotation or scale.
-      // Seat the head at the bone origin without altering its internal mesh,
-      // material, texture, or scale.
-      const center = localBounds.getCenter(new THREE.Vector3());
-      attachment.position.set(-center.x, -localBounds.min.y, -center.z);
-      attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
-    }, undefined, (error) => {
+
+      const morphNames = new Set<string>();
+      loaded.root.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.isMesh && mesh.morphTargetDictionary) {
+          Object.keys(mesh.morphTargetDictionary).forEach((name) => morphNames.add(name));
+        }
+      });
+      propsRef.current.onModelInfo?.({
+        morphNames: [...morphNames].sort(),
+        animationNames: loaded.clips.map((clip) => clip.name || "Unnamed animation"),
+      });
+    }).catch((error: unknown) => {
       if (cancelled) return;
-      const detail = error instanceof Error ? error.message : "Unknown GLB loading error";
-      propsRef.current.onError?.("Failed to load reconstructed head /models/reconstructed/first-face.glb: " + detail);
+      const detail = error instanceof Error ? error.message : "Unknown native head loading error";
+      propsRef.current.onError?.("Failed to load native generated head " + headUrl + ": " + detail);
     });
 
     return () => {
       cancelled = true;
-      const attachment = reconstructedHeadRef.current;
       if (attachment) {
         attachment.parent?.remove(attachment);
         disposeModel(attachment);
-        reconstructedHeadRef.current = null;
       }
+      if (reconstructedHeadRef.current === attachment) reconstructedHeadRef.current = null;
     };
-  }, [props.modelUrl, props.bodyAsset, props.modelName, booted]);
+  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
@@ -270,7 +259,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
   useEffect(() => {
     const loaded = modelRef.current;
-    if (!loaded || props.modelUrl || props.bodyAsset === "female") return;
+    if (!loaded || props.modelUrl || props.bodyAsset === "female" || props.generatedHeadUrl) return;
     if (faceMeshRef.current) {
       faceMeshRef.current.parent?.remove(faceMeshRef.current);
       disposeFaceMesh(faceMeshRef.current);
@@ -340,7 +329,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       disposeFaceMesh(faceMesh);
       if (faceMeshRef.current === faceMesh) faceMeshRef.current = null;
     };
-  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, booted]);
+  }, [props.faceRev, props.faceChoice, props.headScale, props.headY, props.headZ, props.modelUrl, props.bodyAsset, props.generatedHeadUrl, booted]);
 
   useEffect(() => {
     const loaded = modelRef.current;
@@ -363,7 +352,7 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
     const mesh = obj as THREE.Mesh;
     let ancestor: THREE.Object3D | null = mesh;
     while (ancestor) {
-      if (ancestor.name === "AvatarAceReconstructedHead") return;
+      if (ancestor.name === "AvatarAceGeneratedHead" || ancestor.name === "AvatarAceReconstructedHead") return;
       ancestor = ancestor.parent;
     }
     if (!mesh.isMesh || excluded.test(mesh.name || "")) return;
@@ -493,7 +482,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
       }
       const keptCount = kept.length - keptStart;
       if (originalGroups.length && keptCount > 0) {
-        rebuiltGroups.push({ start: keptStart, count: keptCount, materialIndex: group.materialIndex });
+        rebuiltGroups.push({ start: keptStart, count: keptCount, materialIndex: group.materialIndex ?? 0 });
       }
     }
 
@@ -502,7 +491,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
       if (originalGroups.length) {
         geometry.clearGroups();
         for (const group of rebuiltGroups) {
-          geometry.addGroup(group.start, group.count, group.materialIndex);
+          geometry.addGroup(group.start, group.count, group.materialIndex ?? 0);
         }
       }
       geometry.computeVertexNormals();

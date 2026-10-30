@@ -2,3 +2,17 @@ fastapi==0.115.12
 uvicorn[standard]==0.34.2
 python-multipart==0.0.20
 pydantic==2.11.4
+
+# CPU runtime dependencies for the production reconstruction path.
+numpy>=1.24,<2.3
+opencv-python-headless>=4.10
+mediapipe==0.10.35
+scipy>=1.11
+scikit-learn>=1.4
+Pillow>=10
+pyyaml>=6
+tqdm>=4.66
+matplotlib>=3.8
+trimesh>=4
+loguru>=0.7
+yacs>=0.1.8
