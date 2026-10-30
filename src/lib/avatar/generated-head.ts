@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { getGeneratedHeadAsset } from "@/lib/avatar/reconstruction";
 import { ARKIT_BLENDSHAPE_NAMES } from "@/lib/avatar/arkit";
+import { buildGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
 
 export type GeneratedHeadManifest = {
   status?: string;
@@ -433,6 +434,12 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   const neckPosition = rig?.joints?.neck?.position;
   if (Array.isArray(neckPosition) && neckPosition.length >= 3) {
     group.position.set(-neckPosition[0], -neckPosition[1], -neckPosition[2]);
+  }
+
+  const anatomy = buildGeneratedFacialAnatomy(facialLandmarks);
+  if (anatomy) {
+    anatomy.name = "AvatarAceSubjectFittedAnatomy";
+    group.add(anatomy);
   }
 
   group.userData.avatarAceGeneratedHead = {
