@@ -91,19 +91,23 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   const left = contour.reduce((best, p) => p.x < best.x ? p : best, contour[0]);
   const right = contour.reduce((best, p) => p.x > best.x ? p : best, contour[0]);
   const upperShape = new THREE.Shape();
-  upperShape.moveTo(left.x, lowerArc[0].y);
-  for (const p of upperArc) upperShape.lineTo(p.x, p.y);
-  upperShape.lineTo(right.x, lowerArc[lowerArc.length - 1].y);
-  for (const p of [...lowerArc].reverse()) upperShape.lineTo(p.x, p.y);
+  // The upper lid is a real skin patch that rests just above the upper lash
+  // line. It slides down as one piece, covering the globe from top to bottom.
+  // The old collapsed patch started at the eye centre, which made the lid
+  // appear to grow from halfway down the eyeball.
+  const lidTravel = height * 1.45;
+  upperShape.moveTo(upperArc[0].x, upperArc[0].y + lidTravel);
+  for (const p of upperArc) upperShape.lineTo(p.x, p.y + lidTravel);
+  for (const p of [...upperArc].reverse()) upperShape.lineTo(p.x, p.y);
   upperShape.closePath();
-  const upperLid = new THREE.Mesh(new THREE.ShapeGeometry(upperShape, 24), skin.clone());
+  const upperLidMaterial = skin.clone() as THREE.MeshStandardMaterial;
+  upperLidMaterial.color.multiplyScalar(0.84);
+  upperLidMaterial.roughness = 0.92;
+  const upperLid = new THREE.Mesh(new THREE.ShapeGeometry(upperShape, 24), upperLidMaterial);
   upperLid.name = "AvatarAceUpperBlinkLid_" + side;
   upperLid.geometry.translate(0, -center.y, 0);
-  const upperHeight = Math.max(...contour.map((p) => p.y)) - Math.min(...contour.map((p) => p.y));
-  // Anchor the upper lid at the top of the aperture. During a blink it
-  // travels down over the eye instead of expanding upward from the lower rim.
   upperLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.52);
-  upperLid.scale.y = 0.001;
+  upperLid.userData.travel = lidTravel;
   upperLid.renderOrder = 5;
   eye.add(upperLid);
   const lowerShape = new THREE.Shape();
@@ -111,7 +115,10 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   for (const p of lowerArc) lowerShape.lineTo(p.x, p.y);
   lowerShape.lineTo(right.x, center.y);
   lowerShape.closePath();
-  const lowerLid = new THREE.Mesh(new THREE.ShapeGeometry(lowerShape, 16), skin.clone());
+  const lowerLidMaterial = skin.clone() as THREE.MeshStandardMaterial;
+  lowerLidMaterial.color.multiplyScalar(0.92);
+  lowerLidMaterial.roughness = 0.9;
+  const lowerLid = new THREE.Mesh(new THREE.ShapeGeometry(lowerShape, 16), lowerLidMaterial);
   lowerLid.name = "AvatarAceLowerBlinkLid_" + side;
   lowerLid.geometry.translate(0, -center.y, 0);
   lowerLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.53);
@@ -296,8 +303,9 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     // downward as it closes. The lower rim stays subtle instead of sweeping
     // upward and making the eye look as though it closes from below.
     const lidHeight = Number(eye.userData.lidHeight ?? 0);
-    upperLid.scale.y = 0.001 + next * 0.999;
-    upperLid.position.y = Number(eye.userData.eyeCenter instanceof THREE.Vector3 ? eye.userData.eyeCenter.y : 0) - lidHeight * 0.5 * next;
+    upperLid.scale.y = 1;
+    const travel = Number(upperLid.userData.travel ?? lidHeight * 1.45);
+    upperLid.position.y = Number(eye.userData.eyeCenter instanceof THREE.Vector3 ? eye.userData.eyeCenter.y : 0) - travel * next;
     lowerLid.scale.y = 0.001 + next * 0.12;
   }
   const jaw = THREE.MathUtils.clamp(
