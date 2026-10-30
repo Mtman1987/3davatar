@@ -141,7 +141,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loader.load(url,(gltf)=>{
       if(cancelled){disposeModel(gltf.scene);return;}
       const root=new THREE.Group();root.name=props.modelName || (props.modelUrl ? "FinishedCommission" : props.bodyAsset+"-base");root.add(gltf.scene);
-      if (!props.modelUrl && props.bodyAsset === "female") {
+      if (!props.modelUrl && (props.bodyAsset === "female" || props.generatedHeadUrl)) {
         const removal = removeOriginalFemaleHead(root);
         if (removal.eligibleMeshes === 0 || removal.removedTriangles === 0) {
           propsRef.current.onError?.(
@@ -186,7 +186,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       propsRef.current.onError?.("Failed to load required model "+url+": "+detail);
     });
     return ()=>{cancelled=true;};
-  },[props.modelUrl,props.bodyAsset,props.modelName]);
+  },[props.modelUrl,props.bodyAsset,props.modelName,props.generatedHeadUrl]);
 
   useEffect(() => {
     const loaded = modelRef.current;
@@ -369,7 +369,7 @@ function applySkinSuitMaterial(root: THREE.Object3D, skinId: SkinId, sampledTone
     const mesh = obj as THREE.Mesh;
     let ancestor: THREE.Object3D | null = mesh;
     while (ancestor) {
-      if (ancestor.name === "AvatarAceReconstructedHead") return;
+      if (ancestor.name === "AvatarAceGeneratedHead" || ancestor.name === "AvatarAceReconstructedHead") return;
       ancestor = ancestor.parent;
     }
     if (!mesh.isMesh || excluded.test(mesh.name || "")) return;
