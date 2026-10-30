@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""
+CLI runner for Humanoid-Face-3D reconstruction.
+Supports single or multiple input photos and configurable detail level (0-100).
+"""
+import argparse
+import sys
+from pathlib import Path
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from src.pipeline import FaceGeoPipeline
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Reconstruct a high-detail 3D humanoid head mesh from 1–5 photos."
+    )
+    parser.add_argument(
+        "--photos",
+        nargs="+",
+        required=True,
+        help="Path(s) to 1–5 portrait photos (e.g. front.jpg left.jpg right.jpg).",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        required=True,
+        help="Directory to save output 3D meshes and maps.",
+    )
+    parser.add_argument(
+        "--config",
+        "-c",
+        default=str(ROOT / "configs" / "default.yaml"),
+        help="Path to YAML config file (default: configs/default.yaml).",
+    )
+    parser.add_argument(
+        "--detail",
+        "-d",
+        type=int,
+        default=None,
+        help="Detail level (0–100). 0=base mesh, 75=deep wrinkles/pores, 100=studio sculpt.",
+    )
+
+    args = parser.parse_args()
+
+    with open(args.config, "r") as f:
+        cfg = yaml.safe_load(f)
+
+    if args.detail is not None:
+        cfg.setdefault("stage3", {})["detail_level"] = max(0, min(100, args.detail))
+
+    pipeline = FaceGeoPipeline(cfg=cfg)
+    manifest = pipeline.run(args.photos, args.output)
+
+    print("\n" + "=" * 60)
+    print("✅ Reconstruction Complete!")
+    print(f"📁 Output directory: {args.output}")
+    print(f"🗿 High-detail 3D mesh: {Path(args.output) / 'head_mesh_detail.obj'}")
+    print(f"🗿 Clean base mesh:     {Path(args.output) / 'head_mesh.obj'}")
+    print(f"🗺️  16-bit displacement: {Path(args.output) / 'film_displacement_16bit.png'}")
+    print(f"🗺️  Normal map:          {Path(args.output) / 'film_normal.png'}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
