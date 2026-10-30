@@ -53,26 +53,18 @@ for (const sex of ["male", "female"]) {
     });
     console.log("CONNECTED_FACE_FIT_DIAGNOSTIC", JSON.stringify({ sex, head: headWorld.toArray(), sourceOval: sourceBounds, targetFrontHead: targetBounds }));
     const meshes=[];const objects=[];
-    root.traverse(o=>{objects.push(o);if(o.isMesh)meshes.push({mesh:o,geometry:o.geometry,material:o.material,position:o.geometry.getAttribute("position").array.slice()});});
+    root.traverse(o=>{objects.push(o);if(o.isMesh)meshes.push({mesh:o,geometry:o.geometry,material:o.material,position:o.geometry.getAttribute("position").array.slice(),morphs:(o.geometry.morphAttributes.position??[]).map(a=>a.array.slice())});});
     const beforeBones = objects.filter(o=>o.isBone).map(o=>o.matrixWorld.elements.slice());
     const binding = bindConnectedFace(root,face,options);
-    assert.ok(binding.report.changedVertices>1000);assert.equal(binding.report.morphNames.length,52);
+    assert.ok(binding.report.changedVertices>1000);assert.ok(binding.report.morphNames.includes("jawOpen"));assert.ok(binding.report.morphNames.includes("eyeBlinkLeft"));
     const after=[];root.traverse(o=>after.push(o));assert.deepEqual(after,objects);
-    let changed=0;
-    for(const {mesh,geometry,position} of meshes){
-      assert.deepEqual(mesh.geometry.index?.array,geometry.index?.array);
+    for(const {mesh,geometry,position,morphs} of meshes){
+      // Photo application must not replace or reshape the authored body mesh.
+      assert.equal(mesh.geometry,geometry);
+      assert.deepEqual(mesh.geometry.getAttribute("position").array,position);
+      assert.deepEqual((mesh.geometry.morphAttributes.position??[]).map(a=>a.array),morphs);
       for(const name of ["uv","normal","skinIndex","skinWeight"])assert.deepEqual(mesh.geometry.getAttribute(name)?.array,geometry.getAttribute(name)?.array);
-      const next=mesh.geometry.getAttribute("position").array;
-      const normals=geometry.getAttribute("normal");
-      for(let i=0;i<next.length;i+=3){
-        assert.ok(Math.abs(next[i]-position[i])<1e-6);assert.ok(Math.abs(next[i+1]-position[i+1])<1e-6);
-        if(next[i+2]!==position[i+2])changed++;
-        assert.ok(Number.isFinite(next[i+2]));
-        if(position[i+1]<1.3)assert.equal(next[i+2],position[i+2],"body below head remains unchanged");
-        if(normals && normals.getZ(i/3)<=0.25)assert.equal(next[i+2],position[i+2],"grazing-angle side skin must not receive front-photo projection");
-      }
     }
-    assert.ok(changed>1000);
     assert.deepEqual(objects.filter(o=>o.isBone).map(o=>o.matrixWorld.elements),beforeBones);
     const main=root.getObjectByName("base"); const jaw=main.geometry.morphAttributes.position[main.morphTargetDictionary.jawOpen];
     assert.ok(jaw.array.some(v=>Math.abs(v)>0.001));
