@@ -69,6 +69,7 @@ class Stage5Exporter:
         detail_maps: Optional[Dict[str, str]] = None,
         facial_hair_manifest: Optional[Dict[str, Any]] = None,
         subdivision_levels: int = 0,
+        facial_landmarks_3d: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
         """
         Executes the full Stage 5 production export workflow.
@@ -118,6 +119,29 @@ class Stage5Exporter:
         bs_json_path = out_path / "blendshapes_arkit52.json"
         export_blendshapes_json(blendshapes, bs_json_path)
         print(f"[Stage 5] Saved 52 ARKit blendshapes to: {bs_json_path.name}")
+
+        # Subject-specific 3D landmark anchors. They are sampled from this
+        # fitted neutral surface (not a generic template), so downstream facial
+        # feature geometry can be regenerated deterministically for this face.
+        facial_landmarks_path = None
+        if facial_landmarks_3d is not None:
+            anchors = np.asarray(facial_landmarks_3d, dtype=np.float32)
+            if anchors.ndim != 2 or anchors.shape[1] != 3 or not np.isfinite(anchors).all():
+                raise ValueError("facial_landmarks_3d must be a finite Nx3 array.")
+            if len(anchors) < 478:
+                raise ValueError(f"Expected 478 fitted facial landmarks, received {len(anchors)}.")
+            facial_landmarks_file = out_path / "facial_landmarks_3d.json"
+            with open(facial_landmarks_file, "w") as fp:
+                json.dump({
+                    "version": "1.0",
+                    "coordinate_space": "same_as_neutral_base_obj",
+                    "units": "meters",
+                    "landmark_count": int(len(anchors)),
+                    "source": "subject_fitted_neutral_surface_barycentric_embedding",
+                    "points": np.round(anchors, 7).tolist(),
+                }, fp, separators=(",", ":"))
+            facial_landmarks_path = str(facial_landmarks_file.resolve())
+            print(f"[Stage 5] Saved {len(anchors)} subject-fitted 3D facial anchors.")
 
         # 3. Multi-resolution LOD Generation (LOD0 -> LOD3)
         lod_manifest = {}
@@ -263,6 +287,7 @@ class Stage5Exporter:
             "neutral_base_obj": str(base_obj_path.resolve()),
             "blendshapes_json": str(bs_json_path.resolve()),
             "armature_json": armature_path,
+            "facial_landmarks_json": facial_landmarks_path,
             "fbx_file": fbx_manifest.get("fbx_file"),
             "fbx_packaging": fbx_manifest,
             "metahuman_bridge": metahuman_manifest,
