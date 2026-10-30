@@ -3,6 +3,7 @@ name: Validate and package AvatarAce integrated candidate
 on:
   push:
     branches:
+      - main
       - work/avatarace-complete-before-test
   pull_request:
     branches:
