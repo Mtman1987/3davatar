@@ -117,28 +117,25 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
             process = subprocess.Popen(
                 command, cwd=PIPELINE_ROOT, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
+                text=True,
             )
-            with _lock:
-                _jobs[job_id].update(status="running", message="Pipeline process started")
-            assert process.stdout is not None
-            for line in process.stdout:
-                clean = line.rstrip()
-                if not clean:
-                    continue
-                log.write(clean + "\\n")
+            try:
+                output, _ = process.communicate(timeout=1800)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                output, _ = process.communicate()
+                log.write(output or "")
                 log.flush()
-                with _lock:
-                    job = _jobs[job_id]
-                    lines = job.setdefault("logs", [])
-                    lines.append(clean[-1000:])
-                    del lines[:-80]
-                    job["message"] = clean[-500:]
-            return_code = process.wait(timeout=1800)
-        if return_code != 0:
-            with _lock:
-                diagnostic = "\\n".join(_jobs[job_id].get("logs", []))
-            raise RuntimeError("Pipeline exited with code " + str(return_code) + ". Last output:\\n" + diagnostic[-6000:])
+                raise RuntimeError("Pipeline exceeded the 30-minute execution limit.")
+            log.write(output or "")
+            log.flush()
+        output_lines = [line[-1000:] for line in (output or "").splitlines() if line.strip()]
+        with _lock:
+            _jobs[job_id]["logs"] = output_lines[-80:]
+            if output_lines:
+                _jobs[job_id]["message"] = output_lines[-1][-500:]
+        if process.returncode != 0:
+            raise RuntimeError("Pipeline exited with code " + str(process.returncode) + ". Last output:\\n" + (output or "")[-6000:])
         import json
         stage5_path = output_dir / "stage5_export_manifest.json"
         if not stage5_path.is_file():
