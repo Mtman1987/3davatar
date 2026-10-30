@@ -169,15 +169,17 @@ export function buildGeneratedFacialAnatomy(
     const crownGeometry = new THREE.SphereGeometry(1, 20, 14);
     const upper = new THREE.Mesh(crownGeometry, toothMaterial);
     upper.name = "AvatarAceUpperTooth_" + i;
-    upper.position.set(x, neutralGap * 0.42 + toothHeight * 0.5, cavity.position.z + frontSign * detailDepth * 0.55);
+    upper.position.set(x, neutralGap * 0.22 + toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.35);
     upper.scale.set(toothWidth * 0.43, toothHeight * 0.58, toothDepth);
+    upper.userData.baseScaleY = upper.scale.y;
     mouth.add(upper);
     upperTeeth.push(upper);
 
     const lower = new THREE.Mesh(crownGeometry.clone(), toothMaterial);
     lower.name = "AvatarAceLowerTooth_" + i;
-    lower.position.set(x, -neutralGap * 0.42 - toothHeight * 0.5, cavity.position.z + frontSign * detailDepth * 0.55);
+    lower.position.set(x, -neutralGap * 0.22 - toothHeight * 0.30, cavity.position.z - frontSign * toothDepth * 0.35);
     lower.scale.set(toothWidth * 0.43, toothHeight * 0.58, toothDepth);
+    lower.userData.baseScaleY = lower.scale.y;
     mouth.add(lower);
     lowerTeeth.push(lower);
   }
@@ -294,8 +296,15 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   // Keep the upper row anchored to the upper jaw and move the lower row with
   // the opening jaw. A small upper lift prevents the two rows reading as one
   // fixed white strip at the start of a speech shape.
-  for (const tooth of upperTeeth ?? []) tooth.position.y = neutralGap * 0.42 + toothHeight * 0.5 + smile * cavityWidth * 0.025 + jawDrop * 0.12;
-  for (const tooth of lowerTeeth ?? []) tooth.position.y = -neutralGap * 0.42 - toothHeight * 0.5 - jawDrop;
+  const toothReveal = THREE.MathUtils.smoothstep(jaw, 0.06, 0.42);
+  for (const tooth of upperTeeth ?? []) {
+    tooth.position.y = neutralGap * 0.22 + toothHeight * 0.30 + smile * cavityWidth * 0.025 + jawDrop * 0.12;
+    tooth.scale.y = Number(tooth.userData.baseScaleY ?? tooth.scale.y) * toothReveal;
+  }
+  for (const tooth of lowerTeeth ?? []) {
+    tooth.position.y = -neutralGap * 0.22 - toothHeight * 0.30 - jawDrop;
+    tooth.scale.y = Number(tooth.userData.baseScaleY ?? tooth.scale.y) * toothReveal;
+  }
   if (tongue) {
     tongue.position.y = -neutralGap * 0.55 - jawDrop * 0.62;
     tongue.position.z = tongueBaseZ + tongueOut * cavityWidth * 0.22;
