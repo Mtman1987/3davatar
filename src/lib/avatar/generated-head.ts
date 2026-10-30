@@ -76,6 +76,8 @@ export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THR
         source.color.set(0xffffff);
       } else if (targetTone) {
         source.color.copy(targetTone);
+        const multiplier = Number(mesh.userData.avatarSkinToneMultiplier ?? 1);
+        if (isFittedSkinPatch && Number.isFinite(multiplier)) source.color.multiplyScalar(multiplier);
       }
       if (isHeadSurface || isFittedSkinPatch) applyAvatarSkinSurface(source);
     }
