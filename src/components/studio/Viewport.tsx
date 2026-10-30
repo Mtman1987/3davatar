@@ -9,7 +9,7 @@ import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type Ou
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
 type Props = {
-  bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null;
+  bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null; generatedHeadUrl?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; expression: number; faceRev: number;
   sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
@@ -190,61 +190,67 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
   useEffect(() => {
     const loaded = modelRef.current;
-    if (!loaded || props.modelUrl || props.bodyAsset !== "female") return;
+    const headUrl = props.generatedHeadUrl;
+    if (!loaded || props.modelUrl || !headUrl) return;
     let cancelled = false;
     const loader = new GLTFLoader();
-    loader.load("/models/reconstructed/first-face.glb", (gltf) => {
+    loader.load(headUrl, (gltf) => {
       if (cancelled || modelRef.current !== loaded) {
         disposeModel(gltf.scene);
         return;
       }
-      const headBone = findExactHeadBone(loaded.root);
+
+      const headBone = findExactHeadBone(loaded.root) ?? findHeadBone(loaded.root);
       if (!headBone) {
         disposeModel(gltf.scene);
-        propsRef.current.onError?.("Reconstructed head could not attach: female body has no exact head bone.");
+        propsRef.current.onError?.("Generated head could not attach: the selected body has no head or skull bone.");
         return;
       }
 
-      // Attach first, then measure in the attachment's own coordinate frame.
-      // Box3.setFromObject reports world-space bounds; using those values as
-      // GLTF-root local offsets breaks when the exported scene has transforms.
+      // Keep the generator's scene graph intact. Its mesh topology, materials,
+      // textures, morph targets, skinning, and internal transforms remain native.
+      // The generator contract is that the GLB root is authored in head-bone
+      // local coordinates; optional attachment metadata adds only a parent
+      // transform and never rewrites generated vertex data.
       const attachment = new THREE.Group();
-      attachment.name = "AvatarAceReconstructedHead";
+      attachment.name = "AvatarAceGeneratedHead";
+      const metadata = gltf.scene.userData?.avatarAceHead as
+        | { position?: number[]; quaternion?: number[]; scale?: number | number[] }
+        | undefined;
+      if (Array.isArray(metadata?.position) && metadata.position.length >= 3) {
+        attachment.position.fromArray(metadata.position);
+      }
+      if (Array.isArray(metadata?.quaternion) && metadata.quaternion.length >= 4) {
+        attachment.quaternion.fromArray(metadata.quaternion);
+      }
+      if (typeof metadata?.scale === "number") {
+        attachment.scale.setScalar(metadata.scale);
+      } else if (Array.isArray(metadata?.scale) && metadata.scale.length >= 3) {
+        attachment.scale.fromArray(metadata.scale);
+      }
       attachment.add(gltf.scene);
       headBone.add(attachment);
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
-
-      const localBounds = new THREE.Box3();
-      const inverseAttachmentWorld = attachment.matrixWorld.clone().invert();
-      gltf.scene.traverse((object) => {
-        const mesh = object as THREE.Mesh;
-        if (!mesh.isMesh || !mesh.geometry) return;
-        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-        const geometryBounds = mesh.geometry.boundingBox;
-        if (!geometryBounds) return;
-        const meshToAttachment = inverseAttachmentWorld.clone().multiply(mesh.matrixWorld);
-        localBounds.union(geometryBounds.clone().applyMatrix4(meshToAttachment));
-      });
-      if (localBounds.isEmpty()) {
-        headBone.remove(attachment);
-        disposeModel(attachment);
-        propsRef.current.onError?.("Reconstructed head GLB contains no visible geometry.");
-        return;
-      }
-
-      // Bounds are now expressed in attachment-local coordinates, even when
-      // the rig bone or exported GLB scene has a rotation or scale.
-      // Seat the head at the bone origin without altering its internal mesh,
-      // material, texture, or scale.
-      const center = localBounds.getCenter(new THREE.Vector3());
-      attachment.position.set(-center.x, -localBounds.min.y, -center.z);
-      attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
+
+      // Report morph targets from both the body and the newly attached native
+      // head so existing expression controls can discover generator morphs.
+      const morphNames = new Set<string>();
+      loaded.root.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.isMesh && mesh.morphTargetDictionary) {
+          Object.keys(mesh.morphTargetDictionary).forEach((name) => morphNames.add(name));
+        }
+      });
+      propsRef.current.onModelInfo?.({
+        morphNames: [...morphNames].sort(),
+        animationNames: loaded.clips.map((clip) => clip.name || "Unnamed animation"),
+      });
     }, undefined, (error) => {
       if (cancelled) return;
       const detail = error instanceof Error ? error.message : "Unknown GLB loading error";
-      propsRef.current.onError?.("Failed to load reconstructed head /models/reconstructed/first-face.glb: " + detail);
+      propsRef.current.onError?.("Failed to load generated head " + headUrl + ": " + detail);
     });
 
     return () => {
@@ -256,7 +262,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         reconstructedHeadRef.current = null;
       }
     };
-  }, [props.modelUrl, props.bodyAsset, props.modelName, booted]);
+  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
