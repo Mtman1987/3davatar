@@ -118,12 +118,16 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     canvas.addEventListener("pointercancel",onUp);
     const resize = () => { const w=Math.max(1,wrap.clientWidth),h=Math.max(1,wrap.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix(); };
     const observer = new ResizeObserver(resize);observer.observe(wrap);resize();
-    const clock = new THREE.Clock(); let frame=0;
+    const clock = new THREE.Clock(); let frame=0; let cohostTime=0;
     const loop = () => {
-      frame=requestAnimationFrame(loop); const delta=clock.getDelta(); const loaded=modelRef.current; loaded?.mixer?.update(delta);
+      frame=requestAnimationFrame(loop); const delta=clock.getDelta(); cohostTime += Math.max(0, delta); const loaded=modelRef.current; loaded?.mixer?.update(delta);
       const current=propsRef.current; const sound=current.sampleSound(); const tracking=current.sampleTracking?.();
       const presetWeights = current.preset === "captured" ? {} : PRESETS[current.preset];
-      const allWeights: Record<string,number> = {...presetWeights,...(sound ?? {}),...(tracking ?? {}),...(current.manualMorphs ?? {})};
+      // AI cohost idle acting is local and camera-free. Live tracking replaces
+      // these non-speech expressions when explicitly enabled; audio always
+      // owns speech articulation so a camera cannot cancel the spoken mouth.
+      const cohostWeights = tracking ? {} : autonomousCohostWeights(cohostTime);
+      const allWeights: Record<string,number> = {...presetWeights,...cohostWeights,...(tracking ?? {}),...(sound ?? {}),...(current.manualMorphs ?? {})};
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       // The reconstructed head is the authoritative ARKit face rig. Drive it
       // explicitly as well as the body root so expressions never depend on
@@ -643,6 +647,42 @@ function makeFeatheredFaceTexture(source: HTMLCanvasElement) {
   }
   context.putImageData(image, 0, 0);
   return canvas;
+}
+
+function autonomousCohostWeights(time: number): Record<string, number> {
+  // Slow, restrained micro-expressions: attentive gaze, occasional curiosity,
+  // and a faint friendly expression. Blink timing remains handled by the
+  // fitted eyelids so it works even when the mesh has no morph targets.
+  const smoothPulse = (t: number, period: number, width = 0.34) => {
+    const phase = ((t % period) + period) % period / period;
+    const distance = Math.min(phase, 1 - phase);
+    const x = clamp(1 - distance / width, 0, 1);
+    return x * x * (3 - 2 * x);
+  };
+  const curious = smoothPulse(time + 2.1, 13.5, 0.22);
+  const attentive = smoothPulse(time + 5.4, 9.2, 0.2);
+  const gaze = Math.sin(time * 0.31) * 0.5 + Math.sin(time * 0.13 + 1.7) * 0.22;
+  const verticalGaze = Math.sin(time * 0.19 + 0.8) * 0.18;
+  const friendly = 0.055 + smoothPulse(time + 8.3, 17, 0.18) * 0.075;
+  return {
+    eyeLookOutLeft: clamp(gaze, 0, 0.24),
+    eyeLookInLeft: clamp(-gaze, 0, 0.24),
+    eyeLookInRight: clamp(gaze, 0, 0.24),
+    eyeLookOutRight: clamp(-gaze, 0, 0.24),
+    eyeLookUpLeft: clamp(verticalGaze, 0, 0.16),
+    eyeLookUpRight: clamp(verticalGaze, 0, 0.16),
+    eyeLookDownLeft: clamp(-verticalGaze, 0, 0.12),
+    eyeLookDownRight: clamp(-verticalGaze, 0, 0.12),
+    eyeWideLeft: 0.025 + attentive * 0.075 + curious * 0.12,
+    eyeWideRight: 0.025 + attentive * 0.075 + curious * 0.12,
+    browInnerUp: 0.025 + curious * 0.19 + attentive * 0.045,
+    browOuterUpLeft: 0.018 + curious * 0.09,
+    browOuterUpRight: 0.018 + curious * 0.09,
+    mouthSmileLeft: friendly,
+    mouthSmileRight: friendly,
+    cheekSquintLeft: friendly * 0.28,
+    cheekSquintRight: friendly * 0.28,
+  };
 }
 
 function disposeFaceMesh(mesh: THREE.Mesh) {
