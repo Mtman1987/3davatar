@@ -144,12 +144,12 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     loader.load(url,(gltf)=>{
       if(cancelled){disposeModel(gltf.scene);return;}
       const root=new THREE.Group();root.name=props.modelName || (props.modelUrl ? "FinishedCommission" : props.bodyAsset+"-base");root.add(gltf.scene);
-      if (!props.modelUrl && (props.bodyAsset === "female" || props.generatedHeadUrl)) {
+      if (!props.modelUrl && props.generatedHeadUrl) {
         const removal = removeOriginalFemaleHead(root);
-        if (removal.eligibleMeshes === 0 || removal.removedTriangles === 0) {
+        if (removal.eligibleMeshes === 0 && removal.removedTriangles === 0 && removal.removedSeparateMeshes === 0) {
           propsRef.current.onError?.(
-            "Female head removal found no head/jaw-weighted triangles (eligible skinned meshes: " +
-            removal.eligibleMeshes + "). The original head may be in a separate unskinned mesh.",
+            "Original head removal found no head geometry (eligible skinned meshes: " +
+            removal.eligibleMeshes + "). Check the source body mesh names and skin weights.",
           );
         }
       }
@@ -203,19 +203,37 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
         disposeModel(generatedHead);
         return;
       }
+      const neckBone = findNeckBone(loaded.root);
       const headBone = findExactHeadBone(loaded.root) ?? findHeadBone(loaded.root);
-      if (!headBone) {
+      const anchorBone = neckBone ?? headBone;
+      if (!anchorBone) {
         disposeModel(generatedHead);
-        propsRef.current.onError?.("Generated head could not attach: the selected body has no head or skull bone.");
+        propsRef.current.onError?.("Generated head could not attach: the selected body has no neck or head bone.");
         return;
       }
 
-      // Preserve the generator's native mesh, UVs, PBR maps, ARKit morphs,
-      // facial bones, and skin weights. Only the group is parented to the body.
+      // The generated bundle is already translated so its rig's neck joint is
+      // at the bundle origin. Anchor that origin to the body's neck joint,
+      // not the skull-center head joint; parenting to the head bone lifts the
+      // complete head by the neck-to-skull offset.
+      generatedHead.updateMatrixWorld(true);
       attachment = new THREE.Group();
       attachment.name = "AvatarAceGeneratedHeadAttachment";
       attachment.add(generatedHead);
-      headBone.add(attachment);
+      anchorBone.add(attachment);
+      // The lowest neck joint in the body rig is often pitched forward.
+      // The generated bundle is authored upright with its origin at the neck,
+      // so cancel the anchor's inherited world rotation while retaining its
+      // world position. This keeps the head vertical instead of leaning with
+      // the neck chain's bind pose.
+      const anchorWorldQuaternion = anchorBone.getWorldQuaternion(new THREE.Quaternion());
+      attachment.quaternion.copy(anchorWorldQuaternion.invert());
+      // Start the generated head lower than the lowest neck joint so its
+      // neck base overlaps the body's neck instead of hovering above it.
+      // The studio sliders are applied here too (the legacy photo-face path
+      // already consumed them, but the native generated-head path did not).
+      attachment.scale.setScalar(props.headScale);
+      attachment.position.set(0, -0.06 + props.headY, props.headZ);
       loaded.root.updateMatrixWorld(true);
       attachment.updateMatrixWorld(true);
       reconstructedHeadRef.current = attachment;
@@ -245,7 +263,17 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       }
       if (reconstructedHeadRef.current === attachment) reconstructedHeadRef.current = null;
     };
-  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, booted]);
+  }, [props.modelUrl, props.bodyAsset, props.modelName, props.generatedHeadUrl, props.headScale, props.headY, props.headZ, booted]);
+
+  // Keep the complete native generated head interactive after its one-time
+  // load. Changing fit sliders must never reconstruct or refetch the head.
+  useEffect(() => {
+    const attachment = reconstructedHeadRef.current;
+    if (!attachment || props.modelUrl || !props.generatedHeadUrl) return;
+    attachment.scale.setScalar(props.headScale);
+    attachment.position.set(0, -0.06 + props.headY, props.headZ);
+    attachment.updateMatrixWorld(true);
+  }, [props.headScale, props.headY, props.headZ, props.generatedHeadUrl, props.modelUrl, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
@@ -417,11 +445,30 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
   // skinIndex values address this mesh's Skeleton.bones array, not scene-node
   // indices. Resolve head/jaw by each mesh's actual skeleton names so separate
   // GLB primitives and skins cannot silently use the wrong joint numbers.
-  const normalizeBoneName = (name: string) => name.toLowerCase().replace(/[^a-z]/g, "");
+  const normalizeBoneName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
   let totalRemoved = 0;
   let eligibleMeshes = 0;
+  let removedSeparateMeshes = 0;
 
   root.updateMatrixWorld(true);
+  // Remove independently modelled original facial parts too. These can be
+  // separate unskinned objects (eyes/eyeballs/iris) and are not covered by
+  // the weighted triangle pass.
+  const separateHeadParts: THREE.Mesh[] = [];
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
+    const name = normalizeBoneName(mesh.name);
+    if (/^(head|face|skull|cranium|originalhead|originalface|eye[lr]?|eyeball[lr]?|iris[lr]?|pupil[lr]?|cornea[lr]?)$/.test(name)) {
+      separateHeadParts.push(mesh);
+    }
+  });
+  for (const mesh of separateHeadParts) {
+    mesh.parent?.remove(mesh);
+    disposeModel(mesh);
+    removedSeparateMeshes++;
+  }
+
   root.traverse((object) => {
     const mesh = object as THREE.SkinnedMesh;
     if (!mesh.isMesh || !mesh.geometry || !mesh.isSkinnedMesh || !mesh.skeleton) return;
@@ -431,15 +478,34 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
     const position = geometry.getAttribute("position");
     if (!skinIndex || !skinWeight || !position) return;
 
-    const headIndex = mesh.skeleton.bones.findIndex((bone) => {
+    // The eyes and jaw are child joints of the head in these rigs. Include
+    // the complete head-bone subtree so facial geometry weighted to eye.L,
+    // eye.R, jaw, etc. is removed along with the skull.
+    const headRoots = mesh.skeleton.bones.filter((bone) => {
       const name = normalizeBoneName(bone.name);
-      return name === "head" || name.endsWith("head") || name === "skull";
+      return name === "head" || name === "headjoint" || name === "mixamorighead" || name === "skull";
     });
-    const jawIndex = mesh.skeleton.bones.findIndex((bone) => {
+    const headJointIndices = new Set<number>();
+    mesh.skeleton.bones.forEach((bone, boneIndex) => {
+      let current: THREE.Bone | null = bone;
+      while (current) {
+        if (headRoots.includes(current)) {
+          headJointIndices.add(boneIndex);
+          break;
+        }
+        current = current.parent as THREE.Bone | null;
+        if (current && !current.isBone) break;
+      }
+    });
+    // Some exports have jaw/eye joints outside the head hierarchy; include
+    // those explicit facial joints as a safe fallback.
+    mesh.skeleton.bones.forEach((bone, boneIndex) => {
       const name = normalizeBoneName(bone.name);
-      return name === "jaw" || name.endsWith("jaw");
+      if (/^(?:jaw|eyel|eyer|eyeleft|eyeright|eyeball|iris|pupil|cornea)(?:\d+)?$/.test(name)) {
+        headJointIndices.add(boneIndex);
+      }
     });
-    if (headIndex < 0 && jawIndex < 0) return;
+    if (headJointIndices.size === 0) return;
     eligibleMeshes++;
 
     const index = geometry.getIndex();
@@ -462,7 +528,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
           const vertex = index ? index.getX(i + corner) : i + corner;
           for (let slot = 0; slot < 4; slot++) {
             const joint = skinIndex.getComponent(vertex, slot);
-            if (joint === headIndex || joint === jawIndex) {
+            if (headJointIndices.has(joint)) {
               headJawWeight += skinWeight.getComponent(vertex, slot) / 3;
             }
           }
@@ -500,7 +566,7 @@ function removeOriginalFemaleHead(root: THREE.Object3D) {
     }
   });
 
-  const result = { eligibleMeshes, removedTriangles: totalRemoved };
+  const result = { eligibleMeshes, removedTriangles: totalRemoved, removedSeparateMeshes };
   root.userData.avatarAceFemaleHeadRemoval = result;
   return result;
 }
@@ -514,6 +580,24 @@ function findExactHeadBone(root: THREE.Object3D): THREE.Bone | null {
     if (name === "head") exact = bone;
   });
   return exact;
+}
+
+function findNeckBone(root: THREE.Object3D): THREE.Bone | null {
+  // The standardized bodies use a multi-bone neck chain (neck01, neck02,
+  // neck03). The generated bundle's neck joint is at the base of its neck,
+  // so attach to the lowest neck-chain joint, not the upper neck/head joint.
+  root.updateMatrixWorld(true);
+  const candidates: Array<{ bone: THREE.Bone; worldY: number }> = [];
+  root.traverse((object) => {
+    const bone = object as THREE.Bone;
+    if (!bone.isBone) return;
+    const name = bone.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!/^(?:mixamorig)?neck(?:\d+)?$/.test(name) && name !== "neckjoint") return;
+    const world = bone.getWorldPosition(new THREE.Vector3());
+    candidates.push({ bone, worldY: world.y });
+  });
+  candidates.sort((a, b) => a.worldY - b.worldY);
+  return candidates[0]?.bone ?? null;
 }
 
 function findHeadBone(root: THREE.Object3D): THREE.Bone | null {
