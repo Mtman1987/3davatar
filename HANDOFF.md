@@ -1,3 +1,51 @@
+# START HERE — current repair branch and remaining acceptance
+
+## Latest continuation — 2026-10-31
+
+This section supersedes the archived candidate-only status below. The original SHA-256-verified patch has now been applied, with additional reviewed source changes, on branch `fix/contour-eyes-and-stable-motion`, based on main `be4c37ba950361488c5e4c2a67390d96e5bdbd96`. Main and protected model files are unchanged. Check the branch's newest commit for this implementation; remote push/PR status must be verified rather than assumed.
+
+### User clarification and actual supplied files
+
+The user reports that head tilt/turn and eyes respond, but facial blendshapes do not. They do not know where the native reconstruction files are stored. Do not repeatedly ask them to locate a website or JSON files: the repository defines the fetch path.
+
+They supplied `first-face.glb`, a turntable JPG, overlay JPG and skin PNG privately. Binary GLB inspection confirmed generator `trimesh`, one textured mesh named `head_mesh.obj`, zero morph targets, zero skins and zero animation clips. This static file cannot perform expressions. It is NOT proven to be the same asset the generated-head editor is loading. Do not fabricate missing rig data or publicly upload those private attachments. They are not included in this branch or source archive.
+
+### Fetch/storage path, traced from source
+
+- `gallery.ts`: browser IndexedDB database `streamweaver`, store `avatars`, stores generated-head job reference and fit; not the native mesh bundle.
+- `generated-head.ts` parses `/v1/reconstructions/<32-hex-job-id>/assets/<name>` from the reference URL. `avatarace.invalid` is a placeholder, NOT a storage website.
+- `reconstruction.ts` proxies through server-only `FACE_RECONSTRUCTION_URL` and `FACE_RECONSTRUCTION_TOKEN`.
+- Normal `scripts/dev-local.mjs` launches the local service at `127.0.0.1:8001` and sets `FACE_WORK_ROOT` to repo `.local/face-reconstruction-jobs`. Hosted runtime can override the service URL/work root; no production origin or token is committed.
+
+### Additional implementation in this continuation
+
+1. `job_storage.py` and service integration: atomic disk job-state writes; legacy completed-job recovery after service restart; interrupted jobs become failed instead of polling forever. Recovery requires the manifest's native assets to exist. Job IDs, output paths, asset names and symlinks are checked; authentication remains required.
+2. Private head bundle: authenticated `assets/avatarace_head_bundle.zip` returns only manifest-referenced mesh/morph/rig/landmark/map files, not inputs, logs or credentials. 96 MiB uncompressed limit; no-store responses. Save panel exposes **Download head repair package** for the active generated head.
+3. `morph-driver.ts`: native generated morphs reset each frame before sparse live/manual/audio inputs; finite clamped weights; authored photo baseline preserved; unrelated commissioned/body animation weights retained. Diagnostics distinguish absent channels, all-zero buffers and partially inactive targets.
+4. Studio: persistent rig warning and per-channel sliders in Face tab, with **Release controls** to stop overriding tracking. Tracking samples with both fields null no longer suppress idle expressions.
+5. GLB exporter now passes the existing animation clips instead of silently omitting them. Export/reimport acceptance remains pending; custom eye/aperture shaders are still NOT portable to GLB. Save text no longer promises shader export parity.
+6. `test:face`, `test:face-service` and mandatory targeted test steps added to existing integrated-candidate CI. No JS dependency upgrades or licensed asset substitutions.
+
+### Verification in this continuation
+
+- 14 eye/morph tests passed, including independently driving all 52 channels on a synthetic morph mesh, sparse-frame reset, NaN handling and preserving other model animation weights.
+- 12 Python service tests passed: legacy recovery, atomic state, interruption, corrupt state, missing assets, authentication, bounded private ZIP, traversal/symlink rejection and package limit. Uses minimal adapter deps only; no FLAME reconstruction.
+- Typecheck and production build passed before the final animation-export option change; re-run gates on the final commit. DATABASE_URL unset; migration skipped.
+- Actual Chrome/SwiftShader fixture compiled eye shaders and verified closure/reopen and native morph vertex movement/reset, with no fixture page errors.
+- Desktop 1280x800 and mobile 390x844 app entry rendered with zero console/page errors. Uploaded static GLB loaded through a local test-only browser interception and displayed the new missing-blendshape warning, with zero page errors. Those checks do NOT constitute real rig acceptance.
+- Full `npm test`: 181 passed / 16 failed in unchanged template/branding/app-env script tests; chained TS tests skipped. 19 existing npm vulnerabilities remain.
+- Protected commission SHA-256 remains `ab8684c30f9fc5110a38b73a9ed88ebac373d635867ae0b2f03a45f6d51028ba`.
+
+### Next agent
+
+Read this section, inspect the repair branch, and run the targeted gates. Verify remote push/PR before claiming GitHub was updated. Once the user runs the updated source, use **Save → Download head repair package** to obtain the real native head from its service without manual file hunting. If unavailable, the UI now reports the actual service error; verify the service environment and on-disk job output rather than inventing a storage website.
+
+Still open: actual subject morph amplitudes/channel semantics; saved fit; male/female and both Z conventions; strong morph/aperture alignment; head/body/jaw/audio/tracking combinations; complete GLB eye/aperture and animation export/reimport parity; face-perimeter/chin seams; production-browser verification. Do not claim the user's blendshapes or all movements fixed until the real native package passes acceptance.
+
+---
+
+## Archived original handoff — candidate before this continuation
+
 # START HERE — generated-face eyes, eyelids and movement
 
 Updated: 2026-10-31. This is the current handoff for the user's photo/generated-head defects.

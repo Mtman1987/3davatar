@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { makeFittedEye, animateFittedEye, finiteWeight } from "./generated-eye.ts";
 import type { GeneratedHeadFacialLandmarks } from "@/lib/avatar/generated-head";
 
 const EYE_RINGS = [
@@ -27,113 +28,6 @@ function sampleContourY(points: THREE.Vector3[], x: number): number {
   return 0;
 }
 
-function makeEye(points: [number, number, number][], centerIndex: number, ring: number[], skin: THREE.Material, side: string, frontSign: number) {
-  const eye = new THREE.Group();
-  eye.name = "AvatarAceEye_" + side;
-  const contour = ring.map((index) => point(points, index));
-  // Iris landmarks (468/473) sit on the FRONT surface of the eye; they are
-  // not the eyeball centre. Derive the globe centre from the eyelid aperture
-  // and recess it behind the face instead of placing a full sphere at the iris.
-  const irisCenter = point(points, centerIndex);
-  const center = contour.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / contour.length);
-  const width = Math.max(...contour.map((p) => p.x)) - Math.min(...contour.map((p) => p.x));
-  const height = Math.max(...contour.map((p) => p.y)) - Math.min(...contour.map((p) => p.y));
-  const radius = Math.max(width * 0.49, height * 0.82, 0.004);
-  const lidDepth = contour.reduce((sum, p) => sum + p.z, 0) / contour.length;
-  const eyeball = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 32, 24),
-    new THREE.MeshStandardMaterial({ color: 0xf4eee5, roughness: 0.24 }),
-  );
-  eyeball.name = "AvatarAceEyeball_" + side;
-  eyeball.position.set(center.x, center.y, lidDepth - frontSign * radius * 0.24);
-  eyeball.scale.set(width * 0.51, Math.max(height * 0.76, width * 0.20), radius * 0.62);
-  eye.add(eyeball);
-
-  // The iris landmarks anchor a layered iris/pupil on the globe surface.
-  // These are small surface details, not additional protruding eyeballs.
-  const irisRadius = Math.max(width * 0.19, 0.0012);
-  const iris = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 32, 20),
-    new THREE.MeshStandardMaterial({ color: 0x59402d, roughness: 0.34 }),
-  );
-  iris.name = "AvatarAceIris_" + side;
-  // Place iris on the visible front surface of the globe. Using the iris
-  // landmark's raw Z put it inside the eyeball on this export convention,
-  // which made the eye appear completely white.
-  iris.position.set(eyeball.position.x + (irisCenter.x - center.x), eyeball.position.y + (irisCenter.y - center.y), eyeball.position.z + frontSign * (eyeball.scale.z + irisRadius * 0.025));
-  iris.scale.set(irisRadius, irisRadius, irisRadius * 0.16);
-  eye.add(iris);
-
-  const pupil = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 24, 16),
-    new THREE.MeshStandardMaterial({ color: 0x100d0b, roughness: 0.16 }),
-  );
-  pupil.name = "AvatarAcePupil_" + side;
-  pupil.position.set(iris.position.x, iris.position.y, iris.position.z + frontSign * irisRadius * 0.12);
-  pupil.scale.set(irisRadius * 0.39, irisRadius * 0.39, irisRadius * 0.10);
-  eye.add(pupil);
-
-  const cornea = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 24, 16),
-    new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.06, transmission: 0.08, transparent: true, opacity: 0.18, depthWrite: false }),
-  );
-  cornea.name = "AvatarAceCornea_" + side;
-  cornea.position.copy(iris.position);
-  cornea.position.z += frontSign * irisRadius * 0.20;
-  cornea.scale.set(irisRadius * 1.12, irisRadius * 1.12, irisRadius * 0.20);
-  eye.add(cornea);
-
-  // Build separate upper and lower fitted lid patches. Each patch collapses
-  // to the measured lid margin when open, then advances across half the eye
-  // aperture when closing. Both sit in front of the eyeball, not behind it.
-  const upperArc = contour.filter((p) => p.y >= center.y).sort((a, b) => a.x - b.x);
-  const lowerArc = contour.filter((p) => p.y < center.y).sort((a, b) => a.x - b.x);
-  const left = contour.reduce((best, p) => p.x < best.x ? p : best, contour[0]);
-  const right = contour.reduce((best, p) => p.x > best.x ? p : best, contour[0]);
-  const upperShape = new THREE.Shape();
-  // The upper lid is a real skin patch that rests just above the upper lash
-  // line. It slides down as one piece, covering the globe from top to bottom.
-  // The old collapsed patch started at the eye centre, which made the lid
-  // appear to grow from halfway down the eyeball.
-  const lidTravel = height * 1.45;
-  upperShape.moveTo(upperArc[0].x, upperArc[0].y + lidTravel);
-  for (const p of upperArc) upperShape.lineTo(p.x, p.y + lidTravel);
-  for (const p of [...upperArc].reverse()) upperShape.lineTo(p.x, p.y);
-  upperShape.closePath();
-  const upperLidMaterial = skin.clone() as THREE.MeshStandardMaterial;
-  upperLidMaterial.color.multiplyScalar(0.84);
-  upperLidMaterial.roughness = 0.92;
-  const upperLid = new THREE.Mesh(new THREE.ShapeGeometry(upperShape, 24), upperLidMaterial);
-  upperLid.name = "AvatarAceUpperBlinkLid_" + side;
-  upperLid.geometry.translate(0, -center.y, 0);
-  upperLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.52);
-  upperLid.userData.travel = lidTravel;
-  upperLid.userData.avatarSkinToneMultiplier = 0.84;
-  upperLid.renderOrder = 5;
-  eye.add(upperLid);
-  const lowerShape = new THREE.Shape();
-  lowerShape.moveTo(left.x, center.y);
-  for (const p of lowerArc) lowerShape.lineTo(p.x, p.y);
-  lowerShape.lineTo(right.x, center.y);
-  lowerShape.closePath();
-  const lowerLidMaterial = skin.clone() as THREE.MeshStandardMaterial;
-  lowerLidMaterial.color.multiplyScalar(0.92);
-  lowerLidMaterial.roughness = 0.9;
-  const lowerLid = new THREE.Mesh(new THREE.ShapeGeometry(lowerShape, 16), lowerLidMaterial);
-  lowerLid.name = "AvatarAceLowerBlinkLid_" + side;
-  lowerLid.geometry.translate(0, -center.y, 0);
-  lowerLid.position.set(0, center.y, lidDepth + frontSign * radius * 0.53);
-  lowerLid.scale.y = 0.001;
-  lowerLid.userData.avatarSkinToneMultiplier = 0.92;
-  lowerLid.renderOrder = 6;
-  eye.add(lowerLid);
-  eye.userData.upperBlinkLid = upperLid;
-  eye.userData.lowerBlinkLid = lowerLid;
-  eye.userData.eyeCenter = center;
-  eye.userData.lidHeight = height;
-  return eye;
-}
-
 export function buildGeneratedFacialAnatomy(
   landmarks: GeneratedHeadFacialLandmarks | null | undefined,
   skinColor = 0xd6aa91,
@@ -149,8 +43,8 @@ export function buildGeneratedFacialAnatomy(
   const root = new THREE.Group();
   root.name = "AvatarAceProceduralFacialAnatomy";
   const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.8, side: THREE.DoubleSide });
-  root.add(makeEye(points, 468, EYE_RINGS[0], skin, "Left", frontSign));
-  root.add(makeEye(points, 473, EYE_RINGS[1], skin, "Right", frontSign));
+  root.add(makeFittedEye(points, 468, EYE_RINGS[0], skin, "Left", frontSign));
+  root.add(makeFittedEye(points, 473, EYE_RINGS[1], skin, "Right", frontSign));
 
   const lipPoints = INNER_LIPS.map((index) => point(points, index));
   const mouthCenter = lipPoints.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / lipPoints.length);
@@ -279,13 +173,14 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   if (!data) return;
   // Human blinks are brief and irregular, not a metronomic loop. Keep the
   // schedule on this anatomy instance so every cohost has its own cadence.
-  const safeDelta = Math.max(0, Math.min(delta, 0.1));
+  const safeDelta = Number.isFinite(delta) ? Math.max(0, Math.min(delta, 0.1)) : 0;
+  weights = Object.fromEntries(Object.entries(weights).map(([key, value]) => [key, finiteWeight(value)]));
   let blinkClock = Number(root.userData.autoBlinkClock ?? 0);
   let blinkRemaining = Number(root.userData.autoBlinkRemaining ?? 0);
   let nextBlink = Number(root.userData.autoBlinkNext ?? 3.2);
   let blinkDuration = Number(root.userData.autoBlinkDuration ?? 0.16);
   let blinkSeed = Number(root.userData.autoBlinkSeed ?? (0.17 + Math.random() * 0.66));
-  const speed = THREE.MathUtils.clamp(blinkSpeed, 0.08, 0.8);
+  const speed = Number.isFinite(blinkSpeed) ? THREE.MathUtils.clamp(blinkSpeed, 0.08, 0.8) : 0.28;
   blinkClock += safeDelta;
   blinkRemaining = Math.max(0, blinkRemaining - safeDelta);
   nextBlink -= safeDelta;
@@ -310,37 +205,9 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   for (const [index, eye] of data.eyes.entries()) {
     // One shared calibration offset keeps both eyes seated consistently.
     // Negative values recess them into the head; positive values move them out.
-    eye.position.z = frontSign * THREE.MathUtils.clamp(eyeDepthOffset, -0.04, 0.04);
-    const side = index === 0 ? "Left" : "Right";
-    // Rotate the fitted eyeball/iris group itself, so gaze works on the
-    // generated anatomy even when the source head has no eye-look morphs.
-    const lookX = THREE.MathUtils.clamp((weights["eyeLookDown" + side] ?? 0) - (weights["eyeLookUp" + side] ?? 0), -1, 1);
-    const lookY = THREE.MathUtils.clamp((weights["eyeLookIn" + side] ?? 0) - (weights["eyeLookOut" + side] ?? 0), -1, 1);
-    eye.rotation.x = THREE.MathUtils.damp(eye.rotation.x, lookX * 0.16, 12, Math.max(0, delta));
-    eye.rotation.y = THREE.MathUtils.damp(eye.rotation.y, lookY * 0.2, 12, Math.max(0, delta));
-    const upperLid = eye.userData.upperBlinkLid as THREE.Mesh | undefined;
-    const lowerLid = eye.userData.lowerBlinkLid as THREE.Mesh | undefined;
-    if (!upperLid || !lowerLid) continue;
-    const name = "eyeBlink" + side;
-    const squintName = "eyeSquint" + side;
-    const target = Math.max(
-      autoBlink,
-      THREE.MathUtils.clamp(weights[name] ?? weights.eyeBlink ?? 0, 0, 1),
-      THREE.MathUtils.clamp((weights[squintName] ?? 0) * 0.42, 0, 1),
-    );
-    const wide = THREE.MathUtils.clamp(weights["eyeWide" + side] ?? 0, 0, 1);
-    const current = Number(upperLid.userData.blink ?? 0);
-    const next = THREE.MathUtils.damp(current, target, 28, Math.max(0, delta));
-    upperLid.userData.blink = next;
-    lowerLid.userData.blink = next;
-    // The full-aperture upper lid is pinned at its top edge and travels
-    // downward as it closes. The lower rim stays subtle instead of sweeping
-    // upward and making the eye look as though it closes from below.
-    const lidHeight = Number(eye.userData.lidHeight ?? 0);
-    upperLid.scale.y = 1;
-    const travel = Number(upperLid.userData.travel ?? lidHeight * 1.45);
-    upperLid.position.y = Number(eye.userData.eyeCenter instanceof THREE.Vector3 ? eye.userData.eyeCenter.y : 0) - travel * (next - wide * 0.12);
-    lowerLid.scale.y = 0.001 + next * 0.12;
+    const base = eye.userData.basePosition as THREE.Vector3;
+    eye.position.z = base.z + frontSign * (Number.isFinite(eyeDepthOffset) ? THREE.MathUtils.clamp(eyeDepthOffset, -0.04, 0.04) : 0);
+    animateFittedEye(eye, index === 0 ? "Left" : "Right", weights, autoBlink, safeDelta);
   }
   const jaw = THREE.MathUtils.clamp(
     Math.max(weights.jawOpen ?? 0, weights.mouthOpen ?? 0, weights.viseme_aa ?? 0),
@@ -357,9 +224,13 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
   // morph target. Keep its bind rotation neutral every frame, then apply a
   // restrained anatomical rotation so the lower face and fitted jaw props
   // move together without overpowering the subject-specific morph shape.
-  if (jawBone) jawBone.rotation.x = jaw * 0.045;
+  if (jawBone) {
+    jawBone.userData.avatarAceBaseJawQuaternion ??= jawBone.quaternion.clone();
+    const rest = jawBone.userData.avatarAceBaseJawQuaternion as THREE.Quaternion;
+    jawBone.quaternion.copy(rest).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), jaw * 0.045));
+  }
   const mouth = data.mouth;
-  mouth.position.z = Number(mouth.userData.baseZ ?? mouth.position.z) + frontSign * THREE.MathUtils.clamp(mouthDepthOffset, -0.04, 0.04);
+  mouth.position.z = Number(mouth.userData.baseZ ?? mouth.position.z) + frontSign * (Number.isFinite(mouthDepthOffset) ? THREE.MathUtils.clamp(mouthDepthOffset, -0.04, 0.04) : 0);
   const cavity = mouth.userData.cavity as THREE.Mesh | undefined;
   const lowerTeeth = mouth.userData.lowerTeeth as THREE.Mesh[] | undefined;
   const upperTeeth = mouth.userData.upperTeeth as THREE.Mesh[] | undefined;

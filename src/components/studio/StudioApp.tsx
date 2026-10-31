@@ -19,7 +19,7 @@ import {
 import { BODY_ASSETS, FINISHED_MODEL_URL, FINISHED_MODEL_NAME, HAIR, OUTFITS, SKINS, VOICES, labelOf, type Panel } from "@/lib/avatar/constants";
 import { deleteAvatar, getPendingPhoto, listAvatars, saveAvatar, setPendingPhoto, type SavedAvatar } from "@/lib/avatar/gallery";
 import { speakLine } from "@/lib/avatar/speak";
-import { getHeadReconstructionStatus, submitHeadReconstruction } from "@/lib/avatar/reconstruction";
+import { getGeneratedHeadAsset, getHeadReconstructionStatus, submitHeadReconstruction } from "@/lib/avatar/reconstruction";
 import { scriptWeights, Sound2Face } from "@/lib/avatar/sound2face";
 import { LiveFaceTracker } from "@/lib/avatar/live-face-tracker";
 import { useStudio } from "@/lib/avatar/store";
@@ -315,6 +315,8 @@ function Studio({
   const state = useStudio();
   const viewRef = useRef<ViewportHandle>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [rigWarning, setRigWarning] = useState<string | undefined>();
+  const [packageBusy, setPackageBusy] = useState(false);
   const [showPhoneVoice, setShowPhoneVoice] = useState(false);
   const [animationIndex, setAnimationIndex] = useState(0);
   const [animationPlaying, setAnimationPlaying] = useState(false);
@@ -440,8 +442,32 @@ function Studio({
       link.download = file.name;
       link.click();
       URL.revokeObjectURL(url);
-    } catch {
-      setSaveNote("Couldn't export just then. Try again.");
+    } catch (error) {
+      setSaveNote(error instanceof Error ? error.message : "Couldn't export just then. Try again.");
+    }
+  }
+
+  async function downloadHeadPackage() {
+    const headUrl = useStudio.getState().generatedHeadUrl;
+    if (!headUrl || packageBusy) return;
+    setPackageBusy(true);
+    setSaveNote("Preparing private head package…");
+    try {
+      const match = new URL(headUrl).pathname.match(/\/v1\/reconstructions\/([a-f0-9]{32})\/assets\//);
+      if (!match) throw new Error("This saved head has no valid reconstruction job reference.");
+      const result = await getGeneratedHeadAsset({ data: { jobId: match[1], assetName: "avatarace_head_bundle.zip" } });
+      const bytes = Uint8Array.from(atob(result.bytesBase64), (character) => character.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "avatarace-head-" + match[1] + ".zip";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setSaveNote("Head package downloaded. It contains the mesh, rig, morphs, landmarks and maps—not source photos or credentials. Keep it private.");
+    } catch (error) {
+      setSaveNote(error instanceof Error ? error.message : "Could not download the saved head package.");
+    } finally {
+      setPackageBusy(false);
     }
   }
 
@@ -486,7 +512,7 @@ function Studio({
           animationIndex={animationIndex}
           animationPlaying={animationPlaying}
           manualMorphs={morphWeights}
-          onModelInfo={(info) => { setAnimationIndex(0); setAnimationPlaying(false); setMorphWeights({}); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
+          onModelInfo={(info) => { setRigWarning(info.warning); setAnimationIndex(0); setAnimationPlaying(false); setMorphWeights({}); state.patch({ morphNames: info.morphNames, animationNames: info.animationNames, status: "ready", statusText: "", error: null }); }}
           onProgress={(loaded, total) => {
             const current = useStudio.getState();
             const name = current.modelName ?? "base model";
@@ -530,11 +556,27 @@ function Studio({
       </div>
       <section className="safe-bottom flex max-h-[52dvh] flex-col border-t border-border bg-surface lg:max-h-none lg:border-t-0 lg:border-l">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {rigWarning ? <p role="status" className="mb-3 rounded-xl border border-border bg-bg p-3 text-sm text-primary">{rigWarning}</p> : null}
           {state.panel === "body" ? <BodyPanel /> : null}
           {state.panel === "finished" ? <FinishedPanel animationIndex={animationIndex} onAnimationChange={setAnimationIndex} animationPlaying={animationPlaying} onToggleAnimation={() => setAnimationPlaying((playing) => !playing)} morphWeights={morphWeights} onMorphChange={(name, value) => setMorphWeights((current) => ({ ...current, [name]: value }))} onResetMorphs={() => setMorphWeights(Object.fromEntries(state.morphNames.map((name) => [name, 0])))} /> : null}
           {state.panel === "look" ? <LookPanel /> : null}
           {state.panel === "face" ? (
             <FacePanel onCamera={onCamera} onLibrary={onLibrary} onSample={onSample} blinkSpeed={blinkSpeed} onBlinkSpeedChange={setBlinkSpeed} />
+          ) : null}
+          {state.panel === "face" && state.hasFace && state.morphNames.length ? (
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">Test facial blendshapes</h3>
+                <button type="button" className="text-xs text-accent" onClick={() => setMorphWeights({})}>Release controls</button>
+              </div>
+              <p className="text-xs text-muted">Each slider drives the loaded mesh directly. A changed slider overrides tracking for that channel until released.</p>
+              <div className="max-h-56 space-y-3 overflow-y-auto rounded-xl border border-border p-3">
+                {state.morphNames.map((name) => <label key={name} className="block space-y-1">
+                  <span className="flex justify-between gap-2 text-xs text-muted"><span>{name}</span><span>{(morphWeights[name] ?? 0).toFixed(2)}</span></span>
+                  <input aria-label={name} className="w-full" type="range" min="0" max="1" step="0.01" value={morphWeights[name] ?? 0} onChange={(event) => setMorphWeights((current) => ({ ...current, [name]: Number(event.target.value) }))} />
+                </label>)}
+              </div>
+            </div>
           ) : null}
           {state.panel === "voice" ? (
             <VoicePanel
@@ -546,7 +588,7 @@ function Studio({
             />
           ) : null}
           {state.panel === "save" ? (
-            <SavePanel note={saveNote} finishedModel={Boolean(state.modelUrl)} morphCount={state.morphNames.length} onDownload={() => void download()} onKeep={() => void keep()} onOpenSaved={onOpenSaved} />
+            <SavePanel note={saveNote} finishedModel={Boolean(state.modelUrl)} morphCount={state.morphNames.length} hasGeneratedHead={Boolean(state.generatedHeadUrl && !state.modelUrl)} packageBusy={packageBusy} onHeadPackage={() => void downloadHeadPackage()} onDownload={() => void download()} onKeep={() => void keep()} onOpenSaved={onOpenSaved} />
           ) : null}
         </div>
         <nav className="grid grid-cols-6 border-t border-border">
@@ -827,18 +869,21 @@ function VoicePanel({
   );
 }
 
-function SavePanel({ note, finishedModel, morphCount, onDownload, onKeep, onOpenSaved }: { note: string | null; finishedModel: boolean; morphCount: number; onDownload: () => void; onKeep: () => void; onOpenSaved: () => void }) {
+function SavePanel({ note, finishedModel, morphCount, hasGeneratedHead, packageBusy, onHeadPackage, onDownload, onKeep, onOpenSaved }: { note: string | null; finishedModel: boolean; morphCount: number; hasGeneratedHead: boolean; packageBusy: boolean; onHeadPackage: () => void; onDownload: () => void; onKeep: () => void; onOpenSaved: () => void }) {
   return (
     <div className="space-y-3">
       <h2 className="font-display text-xl text-fg">Your avatar is ready</h2>
       <p className="text-sm text-pretty text-muted">
         {finishedModel
           ? `The commissioned model is preserved as supplied, with ${morphCount} embedded facial morph targets and its included animations.`
-          : "The generated avatar includes the 52 face expressions, so it can move in StreamWeaver, VSeeFace, Unity, or from an Audio2Face stream."}
+          : `The loaded avatar exposes ${morphCount} morph channels. GLB preserves native mesh targets, but custom generated-eye shaders are not portable; use the head package for repair and reimport.`}
       </p>
       <button type="button" className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary font-medium text-primary-fg" onClick={onDownload}>
         <Download className="size-4" /> Download GLB
       </button>
+      {hasGeneratedHead ? <button type="button" disabled={packageBusy} className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-fg disabled:opacity-50" onClick={onHeadPackage}>
+        <Download className="size-4" /> {packageBusy ? "Preparing head package…" : "Download head repair package"}
+      </button> : null}
       <button type="button" className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-fg" onClick={onKeep}>
         <Check className="size-4" /> Save on this phone
       </button>

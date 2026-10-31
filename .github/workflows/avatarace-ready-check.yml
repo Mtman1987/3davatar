@@ -41,6 +41,11 @@ jobs:
         run: |
           python -m compileall -q face-reconstruction-service src scripts/run_pipeline.py
 
+      - name: Test private saved-head recovery and downloads
+        run: |
+          python -m pip install fastapi==0.115.12 python-multipart==0.0.20 pydantic==2.11.4 httpx==0.28.1
+          python -m unittest discover -s face-reconstruction-service -p 'test_*.py' -v
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -52,6 +57,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Test fitted eyes and all native ARKit morph channels
+        run: npm run test:face
 
       - name: Run repository-wide tests (known unrelated failures are non-blocking for AvatarAce)
         continue-on-error: true

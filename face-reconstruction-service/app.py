@@ -13,6 +13,8 @@ from typing import Any
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.responses import Response
+from job_storage import ASSET_NAME, head_bundle, job_directory, published_assets, recover_job, write_job
 
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_ROOT = Path(os.environ.get("FACE_PIPELINE_ROOT", str(ROOT))).resolve()
@@ -28,6 +30,20 @@ MAX_PHOTOS = 5
 app = FastAPI(title="AvatarAce Face Reconstruction", version="0.1.0")
 _lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
+
+
+def find_job(job_id: str) -> dict[str, Any] | None:
+    """Called under _lock; do not depend on a prior request in this process."""
+    try:
+        job_directory(WORK_ROOT, job_id)
+        job = _jobs.get(job_id)
+        if job is None:
+            job = recover_job(WORK_ROOT, job_id)
+            if job is not None:
+                _jobs[job_id] = job
+        return job
+    except (OSError, ValueError, TypeError):
+        raise HTTPException(404, "Reconstruction job not found")
 
 
 class JobResponse(BaseModel):
@@ -115,6 +131,7 @@ async def create_reconstruction(
 
     with _lock:
         _jobs[job_id] = {"status": "queued", "message": "Photos accepted", "directory": str(job_dir), "log_path": str(job_dir / "pipeline.log"), "logs": []}
+        write_job(job_dir, _jobs[job_id])
 
     threading.Thread(
         target=run_pipeline,
@@ -125,9 +142,10 @@ async def create_reconstruction(
 
 
 def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
-    with _lock:
-        _jobs[job_id].update(status="running", message="Reconstructing photo-specific head geometry")
     try:
+        with _lock:
+            _jobs[job_id].update(status="running", message="Reconstructing photo-specific head geometry")
+            write_job(output_dir.parent, _jobs[job_id])
         env = os.environ.copy()
         env["FACE_MODEL_DIR"] = str(MODEL_DIR)
         env["FACE_RECONSTRUCTION_SKIP_CLAY"] = "1"
@@ -231,6 +249,7 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
         (output_dir / "avatarace_head_manifest.json").write_text(json.dumps(browser_manifest, indent=2))
         with _lock:
             _jobs[job_id].update(status="complete", message="Native head geometry, ARKit morphs, rig, and texture assets exported")
+            write_job(output_dir.parent, _jobs[job_id])
     except Exception as exc:
         with _lock:
             job = _jobs.get(job_id, {})
@@ -242,13 +261,17 @@ def run_pipeline(job_id: str, photos: list[Path], output_dir: Path) -> None:
                 pass
             job.update(status="failed", message=str(exc)[:6000])
             _jobs[job_id] = job
+            try:
+                write_job(output_dir.parent, job)
+            except OSError:
+                pass
 
 
 @app.get("/v1/reconstructions/{job_id}")
 def get_reconstruction(job_id: str, x_face_reconstruction_token: str | None = Header(default=None)) -> dict[str, Any]:
     authorize(x_face_reconstruction_token)
     with _lock:
-        job = _jobs.get(job_id)
+        job = find_job(job_id)
         if job is None:
             raise HTTPException(404, "Reconstruction job not found")
         return {"id": job_id, "status": job["status"], "message": job["message"], "logs": job.get("logs", [])}
@@ -259,15 +282,26 @@ def get_asset(
     job_id: str,
     asset_name: str,
     x_face_reconstruction_token: str | None = Header(default=None),
-) -> FileResponse:
+) -> Response:
     authorize(x_face_reconstruction_token)
-    if Path(asset_name).name != asset_name or asset_name in {".", ".."}:
+    if not ASSET_NAME.fullmatch(asset_name) or asset_name in {".", ".."}:
         raise HTTPException(404, "Asset not found")
     with _lock:
-        job = _jobs.get(job_id)
+        job = find_job(job_id)
+        if job is None:
+            raise HTTPException(404, "Reconstruction job not found")
         if job is None or job["status"] != "complete":
             raise HTTPException(409, "Reconstruction is not complete")
-        path = Path(job["directory"]) / "output" / asset_name
-    if not path.is_file():
+        directory = job_directory(WORK_ROOT, job_id)
+    try:
+        if asset_name == "avatarace_head_bundle.zip":
+            return Response(head_bundle(directory), media_type="application/zip", headers={
+                "Content-Disposition": 'attachment; filename="avatarace_head_bundle.zip"',
+                "Cache-Control": "no-store",
+            })
+        path = next((path for path in published_assets(directory) if path.name == asset_name), None)
+    except (OSError, ValueError, TypeError):
+        raise HTTPException(409, "Saved head assets are incomplete or cannot be packaged")
+    if path is None:
         raise HTTPException(404, "Asset not found")
-    return FileResponse(path, filename=asset_name)
+    return FileResponse(path, filename=asset_name, headers={"Cache-Control": "no-store"})
