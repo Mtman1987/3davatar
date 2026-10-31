@@ -8,6 +8,7 @@ import { getFaceCache } from "@/lib/avatar/face-cache";
 import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { animateGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
 import { applyAvatarSkinSurface } from "@/lib/avatar/skin-material";
+import type { LiveTrackingSample } from "@/lib/avatar/live-face-tracker";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
@@ -16,7 +17,7 @@ type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null; generatedHeadUrl?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
   headScale: number; headY: number; headZ: number; eyeDepth?: number; mouthDepth?: number; expression: number; faceRev: number; blinkSpeed?: number;
-  sampleSound: () => Weights | null; sampleTracking?: () => Record<string, number> | null;
+  sampleSound: () => Weights | null; sampleTracking?: () => LiveTrackingSample | null;
   manualMorphs?: Record<string, number>; animationIndex?: number; animationPlaying?: boolean; onModelInfo?: (info: ModelInfo) => void; onProgress?: (loaded: number, total: number) => void; onError?: (message: string) => void;
 };
 type LoadedModel = { root: THREE.Group; clips: THREE.AnimationClip[]; mixer: THREE.AnimationMixer | null };
@@ -129,7 +130,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       // owns speech articulation so a camera cannot cancel the spoken mouth.
       const speechActivity = Math.max(sound?.jawOpen ?? 0, sound?.mouthLowerDownLeft ?? 0, sound?.mouthLowerDownRight ?? 0);
       const cohostWeights = tracking ? {} : autonomousCohostWeights(cohostTime, clamp((speechActivity - 0.035) * 2.4, 0, 1));
-      const allWeights: Record<string,number> = {...presetWeights,...cohostWeights,...(tracking ?? {}),...(sound ?? {}),...(current.manualMorphs ?? {})};
+      const allWeights: Record<string,number> = {...presetWeights,...cohostWeights,...(tracking?.weights ?? {}),...(sound ?? {}),...(current.manualMorphs ?? {})};
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       // The reconstructed head is the authoritative ARKit face rig. Drive it
       // explicitly as well as the body root so expressions never depend on
@@ -137,6 +138,15 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       const generatedHead = reconstructedHeadRef.current;
       if (generatedHead) {
          applyMorphs(generatedHead,allWeights,current.expression);
+         const headBone = generatedHead.getObjectByName("head") as THREE.Bone | null;
+         if (headBone) {
+           const base = headBone.userData.avatarAceBaseHeadQuaternion as THREE.Quaternion | undefined;
+           if (!base) headBone.userData.avatarAceBaseHeadQuaternion = headBone.quaternion.clone();
+           const rest = headBone.userData.avatarAceBaseHeadQuaternion as THREE.Quaternion;
+           const pose = tracking?.headRotation;
+           const offset = pose ? new THREE.Quaternion().setFromEuler(new THREE.Euler(pose.x, pose.y, pose.z, "YXZ")) : new THREE.Quaternion();
+           headBone.quaternion.copy(rest).multiply(offset);
+         }
          const anatomy = generatedHead.getObjectByName("AvatarAceSubjectFittedAnatomy");
          const jawBone = generatedHead.getObjectByName("jaw") as THREE.Bone | null;
          if (anatomy) animateGeneratedFacialAnatomy(anatomy, allWeights, delta, current.blinkSpeed ?? 0.28, jawBone, current.eyeDepth ?? 0, current.mouthDepth ?? 0);
