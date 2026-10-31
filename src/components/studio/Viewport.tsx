@@ -9,7 +9,6 @@ import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avata
 import { animateGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
 import { applyAvatarSkinSurface } from "@/lib/avatar/skin-material";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
-import { applyRiggedWardrobe } from "@/lib/avatar/wardrobe";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
@@ -303,13 +302,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     attachment.updateMatrixWorld(true);
   }, [props.headScale, props.headY, props.headZ, props.generatedHeadUrl, props.modelUrl, booted]);
 
-  useEffect(() => {
-    // Wardrobe applies only to the generic base bodies; the commissioned model stays view-only.
-    const loaded = modelRef.current;
-    if (!loaded || props.modelUrl) return;
-    const useRealMaleTee = props.bodyAsset === "male" && props.outfit === "tee";
-    return applyRiggedWardrobe(loaded.root, props.bodyAsset, props.outfit, props.hair, useRealMaleTee);
-  }, [props.outfit, props.hair, props.bodyAsset, props.modelUrl, booted]);
+
 
   useEffect(() => {
     const loaded = modelRef.current;
