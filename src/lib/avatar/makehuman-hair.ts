@@ -106,13 +106,13 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
       const [a, b, factor] = [Number(values[0]), Number(values[1]), Number(values[2])];
       if (![a, b].every((v) => Number.isInteger(v) && v >= 0)) throw new Error(`Invalid ${key} vertex pair`);
       result.scale.push({ axis: key[0] as "x" | "y" | "z", vertices: [a, b], factor: finite(factor, key) });
-    } else if (/^[lr]_[xyz]_shear$/.test(key)) {
+    } else if (/^[lr]_shear_[xyz]$/.test(key)) {
       if (values.length !== 4) throw new Error(`Malformed ${key} at line ${index + 1}`);
       const [a, b, factorA, factorB] = values.map(Number);
       if (![a, b].every((v) => Number.isInteger(v) && v >= 0)) throw new Error(`Invalid ${key} vertex pair`);
       result.shear.push({
         side: key[0] as "l" | "r",
-        axis: key[2] as "x" | "y" | "z",
+        axis: key[8] as "x" | "y" | "z",
         vertices: [a, b],
         factors: [finite(factorA!, key), finite(factorB!, key)],
       });
