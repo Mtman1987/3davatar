@@ -2,7 +2,7 @@
 
 ## Latest continuation — 2026-10-31
 
-This section supersedes the archived candidate-only status below. The original SHA-256-verified patch has now been applied, with additional reviewed source changes, on branch `fix/contour-eyes-and-stable-motion`, based on main `be4c37ba950361488c5e4c2a67390d96e5bdbd96`. Main and protected model files are unchanged. Check the branch's newest commit for this implementation; remote push/PR status must be verified rather than assumed.
+This section supersedes the archived candidate-only status below. The original SHA-256-verified patch has now been applied, with additional reviewed source changes, on branch `fix/contour-eyes-and-stable-motion`, based on main `be4c37ba950361488c5e4c2a67390d96e5bdbd96`. Implementation commit: `cee2a6e`. Main and protected model files are unchanged. Remote push FAILED: `fatal: could not read Username for 'https://github.com': No such device or address`. No PR was opened. The downloadable git patch/source archive preserves the work; authenticate GitHub and push this branch before claiming the remote repository is updated.
 
 ### User clarification and actual supplied files
 
@@ -30,7 +30,7 @@ They supplied `first-face.glb`, a turntable JPG, overlay JPG and skin PNG privat
 
 - 14 eye/morph tests passed, including independently driving all 52 channels on a synthetic morph mesh, sparse-frame reset, NaN handling and preserving other model animation weights.
 - 12 Python service tests passed: legacy recovery, atomic state, interruption, corrupt state, missing assets, authentication, bounded private ZIP, traversal/symlink rejection and package limit. Uses minimal adapter deps only; no FLAME reconstruction.
-- Typecheck and production build passed before the final animation-export option change; re-run gates on the final commit. DATABASE_URL unset; migration skipped.
+- Final typecheck and production build passed INCLUDING the animation-export option change. DATABASE_URL unset; migration skipped.
 - Actual Chrome/SwiftShader fixture compiled eye shaders and verified closure/reopen and native morph vertex movement/reset, with no fixture page errors.
 - Desktop 1280x800 and mobile 390x844 app entry rendered with zero console/page errors. Uploaded static GLB loaded through a local test-only browser interception and displayed the new missing-blendshape warning, with zero page errors. Those checks do NOT constitute real rig acceptance.
 - Full `npm test`: 181 passed / 16 failed in unchanged template/branding/app-env script tests; chained TS tests skipped. 19 existing npm vulnerabilities remain.
