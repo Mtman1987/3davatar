@@ -70,8 +70,8 @@ export class LiveFaceTracker {
     this.loop();
   }
 
-  sample(): Weights | null {
-    return this.weights;
+  sample(): LiveTrackingSample {
+    return { weights: this.weights, headRotation: this.headRotation };
   }
 
   stop() {
@@ -88,7 +88,9 @@ export class LiveFaceTracker {
       this.video = null;
     }
     this.weights = null;
-    this.smoothed = {};\n    this.neutralFaceRotation = null;\n    this.headRotation = null;
+    this.smoothed = {};
+    this.neutralFaceRotation = null;
+    this.headRotation = null;
   }
 
   private loop = () => {
@@ -108,7 +110,24 @@ export class LiveFaceTracker {
         this.lastVideoTime = video.currentTime;
         try {
           const result = landmarker.detectForVideo(video, now);
-          const matrixData = result.facialTransformationMatrixes?.[0]?.data;\n          if (matrixData?.length === 16) {\n            const matrix = new THREE.Matrix4().fromArray(matrixData);\n            const currentRotation = new THREE.Quaternion();\n            matrix.decompose(new THREE.Vector3(), currentRotation, new THREE.Vector3());\n            if (!this.neutralFaceRotation) this.neutralFaceRotation = currentRotation.clone();\n            const relative = this.neutralFaceRotation.clone().invert().multiply(currentRotation).normalize();\n            const euler = new THREE.Euler().setFromQuaternion(relative, "YXZ");\n            const nextRotation = { x: euler.x, y: euler.y, z: euler.z };\n            const previousRotation = this.headRotation ?? nextRotation;\n            const alpha = 0.28;\n            this.headRotation = {\n              x: previousRotation.x + (nextRotation.x - previousRotation.x) * alpha,\n              y: previousRotation.y + (nextRotation.y - previousRotation.y) * alpha,\n              z: previousRotation.z + (nextRotation.z - previousRotation.z) * alpha,\n            };\n          }\n          const categories = result.faceBlendshapes?.[0]?.categories;
+          const matrixData = result.facialTransformationMatrixes?.[0]?.data;
+          if (matrixData?.length === 16) {
+            const matrix = new THREE.Matrix4().fromArray(matrixData);
+            const currentRotation = new THREE.Quaternion();
+            matrix.decompose(new THREE.Vector3(), currentRotation, new THREE.Vector3());
+            if (!this.neutralFaceRotation) this.neutralFaceRotation = currentRotation.clone();
+            const relative = this.neutralFaceRotation.clone().invert().multiply(currentRotation).normalize();
+            const euler = new THREE.Euler().setFromQuaternion(relative, "YXZ");
+            const nextRotation = { x: euler.x, y: euler.y, z: euler.z };
+            const previousRotation = this.headRotation ?? nextRotation;
+            const alpha = 0.28;
+            this.headRotation = {
+              x: previousRotation.x + (nextRotation.x - previousRotation.x) * alpha,
+              y: previousRotation.y + (nextRotation.y - previousRotation.y) * alpha,
+              z: previousRotation.z + (nextRotation.z - previousRotation.z) * alpha,
+            };
+          }
+          const categories = result.faceBlendshapes?.[0]?.categories;
           if (categories?.length) {
             const next: Weights = {};
             for (const item of categories) {
