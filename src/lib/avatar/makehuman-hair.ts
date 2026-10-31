@@ -25,7 +25,7 @@ export type HairShearDirective = {
   side: "l" | "r";
   axis: "x" | "y" | "z";
   vertices: readonly [number, number];
-  factors: readonly [number, number];
+  factor: number;
 };
 
 export type MakeHumanHairProxy = {
@@ -64,6 +64,7 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     metadata: {},
   };
   let readingFit = false;
+  let declaredVertexCount: number | null = null;
 
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
     const line = rawLine.trim();
@@ -90,10 +91,9 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     }
 
     if (key === "verts") {
-      // In MakeHuman proxies, `verts 0` is the start marker for the fitting
-      // map, not a declaration that the map contains zero records.
-      if (values.length !== 1 || !Number.isInteger(Number(values[0])) || Number(values[0]) < 0) {
-        throw new Error(`Invalid verts marker at line ${index + 1}`);
+      declaredVertexCount = Number(values[0]);
+      if (!Number.isInteger(declaredVertexCount) || declaredVertexCount! < 0) {
+        throw new Error(`Invalid verts declaration at line ${index + 1}`);
       }
       readingFit = true;
       continue;
@@ -102,20 +102,23 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     else if (key === "obj_file") result.objectFile = values.join(" ");
     else if (key === "material" || key === "material_file") result.materialFile = values.join(" ");
     else if (/^[xyz]_scale$/.test(key)) {
-      if (values.length !== 3) throw new Error(`Malformed ${key} at line ${index + 1}`);
+      if (values.length !== 4) throw new Error(`Malformed ${key} at line ${index + 1}`);
       const [a, b, factor] = [Number(values[0]), Number(values[1]), Number(values[2])];
       if (![a, b].every((v) => Number.isInteger(v) && v >= 0)) throw new Error(`Invalid ${key} vertex pair`);
       result.scale.push({ axis: key[0] as "x" | "y" | "z", vertices: [a, b], factor: finite(factor, key) });
     } else if (/^[lr]_[xyz]_shear$/.test(key)) {
-      if (values.length !== 4) throw new Error(`Malformed ${key} at line ${index + 1}`);
-      const [a, b, left, right] = [Number(values[0]), Number(values[1]), Number(values[2]), Number(values[3])];
+      if (values.length !== 3) throw new Error(`Malformed ${key} at line ${index + 1}`);
+      const [a, b, factor] = [Number(values[0]), Number(values[1]), Number(values[2])];
       if (![a, b].every((v) => Number.isInteger(v) && v >= 0)) throw new Error(`Invalid ${key} vertex pair`);
-      result.shear.push({ side: key[0] as "l" | "r", axis: key[2] as "x" | "y" | "z", vertices: [a, b], factors: [finite(left, key), finite(right, key)] });
+      result.shear.push({ side: key[0] as "l" | "r", axis: key[2] as "x" | "y" | "z", vertices: [a, b], factor: finite(factor, key) });
     } else {
       result.metadata[key] = values.join(" ");
     }
   }
 
+  if (declaredVertexCount !== null && result.fitRecords.length !== declaredVertexCount) {
+    throw new Error(`Proxy declares ${declaredVertexCount} fitted vertices but contains ${result.fitRecords.length} records`);
+  }
   if (!result.baseMesh) throw new Error("MakeHuman hair proxy is missing basemesh");
   return result;
 }
