@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { ARKIT_BLENDSHAPE_NAMES, PRESETS, type Weights } from "@/lib/avatar/arkit";
 import { getFaceCache } from "@/lib/avatar/face-cache";
@@ -8,6 +9,7 @@ import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avata
 import { animateGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
 import { applyAvatarSkinSurface } from "@/lib/avatar/skin-material";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
+import { applyRiggedWardrobe } from "@/lib/avatar/wardrobe";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
 export type ModelInfo = { morphNames: string[]; animationNames: string[] };
@@ -300,6 +302,113 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
     attachment.position.set(0, -0.06 + props.headY, props.headZ);
     attachment.updateMatrixWorld(true);
   }, [props.headScale, props.headY, props.headZ, props.generatedHeadUrl, props.modelUrl, booted]);
+
+  useEffect(() => {
+    // Wardrobe applies only to the generic base bodies; the commissioned model stays view-only.
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl) return;
+    const useRealMaleTee = props.bodyAsset === "male" && props.outfit === "tee";
+    return applyRiggedWardrobe(loaded.root, props.bodyAsset, props.outfit, props.hair, useRealMaleTee);
+  }, [props.outfit, props.hair, props.bodyAsset, props.modelUrl, booted]);
+
+  useEffect(() => {
+    const loaded = modelRef.current;
+    if (!loaded || props.modelUrl || props.bodyAsset !== "male" || props.outfit !== "tee") return;
+    const root = loaded.root;
+    let cancelled = false;
+    const loader = new OBJLoader();
+    let shirtObject: THREE.Group | null = null;
+    let shirtTexture: THREE.Texture | null = null;
+    loader.load("/models/clothing/male-shirt/crude_male_shirt.obj", (shirt) => {
+      if (cancelled || modelRef.current?.root !== root) {
+        disposeModel(shirt);
+        return;
+      }
+      shirt.name = "AvatarAceRealMaleTee";
+      const sourceBounds = new THREE.Box3().setFromObject(shirt);
+      root.updateMatrixWorld(true);
+      const bodyBounds = new THREE.Box3().setFromObject(root);
+      if (sourceBounds.isEmpty() || bodyBounds.isEmpty()) {
+        propsRef.current.onError?.("The male tee or base body has no usable geometry.");
+        disposeModel(shirt);
+        return;
+      }
+      const sourceSize = sourceBounds.getSize(new THREE.Vector3());
+      const sourceCenter = sourceBounds.getCenter(new THREE.Vector3());
+      const bodySize = bodyBounds.getSize(new THREE.Vector3());
+      if (sourceSize.y <= 0 || bodySize.y <= 0) {
+        propsRef.current.onError?.("Could not calculate male tee fit from garment and body bounds.");
+        disposeModel(shirt);
+        return;
+      }
+      const rootScale = Math.abs(root.getWorldScale(new THREE.Vector3()).y) || 1;
+      // The source tee is oversized relative to AvatarAce's standardized base body.
+      // Reduce the first-pass fit by 18%, and bias its depth back toward the chest
+      // rather than centering it on the full-body bounds (which include feet/head).
+      const scale = ((bodySize.y * 0.40) / sourceSize.y / rootScale) * 0.82;
+      shirt.scale.setScalar(scale);
+      const bodyCenter = bodyBounds.getCenter(new THREE.Vector3());
+      const target = new THREE.Vector3(
+        bodyCenter.x,
+        bodyBounds.min.y + bodySize.y * 0.72,
+        bodyCenter.z - bodySize.z * 0.16,
+      );
+      const local = root.worldToLocal(target.clone());
+      shirt.position.set(
+        local.x - sourceCenter.x * scale,
+        local.y - sourceCenter.y * scale,
+        local.z - sourceCenter.z * scale,
+      );
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x3b9eaa,
+        roughness: 0.88,
+        metalness: 0,
+        side: THREE.DoubleSide,
+      });
+      shirt.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.material = material;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      });
+      root.add(shirt);
+      root.updateMatrixWorld(true);
+      shirtObject = shirt;
+      new THREE.TextureLoader().load(
+        "/models/clothing/male-shirt/crude_male_tex.png",
+        (texture) => {
+          if (cancelled || modelRef.current?.root !== root) {
+            texture.dispose();
+            return;
+          }
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          material.map = texture;
+          material.color.set(0xffffff);
+          material.needsUpdate = true;
+          shirtTexture = texture;
+        },
+        undefined,
+        () => {
+          // A solid material remains usable if the optional source texture fails.
+        },
+      );
+    }, undefined, (error) => {
+      if (!cancelled) {
+        const detail = error instanceof Error ? error.message : "Unknown OBJ loading error";
+        propsRef.current.onError?.("Failed to load the real male tee: " + detail);
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (shirtObject) {
+        shirtObject.parent?.remove(shirtObject);
+        disposeModel(shirtObject);
+      }
+      shirtTexture?.dispose();
+    };
+  }, [props.outfit, props.bodyAsset, props.modelUrl, booted]);
 
   useEffect(() => {
     // Skin suits are treatments on the real male/female base GLBs only.
