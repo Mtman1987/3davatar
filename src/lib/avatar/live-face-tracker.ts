@@ -112,7 +112,15 @@ export class LiveFaceTracker {
           const result = landmarker.detectForVideo(video, now);
           const matrixData = result.facialTransformationMatrixes?.[0]?.data;
           if (matrixData?.length === 16) {
-            const matrix = new THREE.Matrix4().fromArray(matrixData);
+            // MediaPipe serializes this 4x4 transform as row-major matrix rows.
+            // THREE.Matrix4.fromArray() expects column-major elements, so using
+            // it directly transposes the rotation and scrambles yaw, pitch and roll.
+            const matrix = new THREE.Matrix4().set(
+              matrixData[0]!, matrixData[1]!, matrixData[2]!, matrixData[3]!,
+              matrixData[4]!, matrixData[5]!, matrixData[6]!, matrixData[7]!,
+              matrixData[8]!, matrixData[9]!, matrixData[10]!, matrixData[11]!,
+              matrixData[12]!, matrixData[13]!, matrixData[14]!, matrixData[15]!,
+            );
             const currentRotation = new THREE.Quaternion();
             matrix.decompose(new THREE.Vector3(), currentRotation, new THREE.Vector3());
             if (!this.neutralFaceRotation) this.neutralFaceRotation = currentRotation.clone();
