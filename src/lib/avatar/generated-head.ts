@@ -430,7 +430,17 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   const anatomy = buildGeneratedFacialAnatomy(facialLandmarks);
   if (anatomy) {
     anatomy.name = "AvatarAceSubjectFittedAnatomy";
-    group.add(anatomy);
+    // Facial landmarks are authored in neutral-head mesh coordinates. Keep
+    // the fitted eyes and lids in that exact world-space position at bind,
+    // but parent them to the generated rig's head bone so head pose rotates
+    // the complete face and its anatomy as one unit. Eye gaze remains a
+    // separate local rotation inside each eye group.
+    const headBone = group.getObjectByName("head") as THREE.Bone | null;
+    if (!headBone) {
+      throw new Error("Generated head rig is missing the head bone required to attach fitted facial anatomy.");
+    }
+    group.updateMatrixWorld(true);
+    headBone.attach(anatomy);
   }
 
   group.userData.avatarAceGeneratedHead = {
