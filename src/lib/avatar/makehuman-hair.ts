@@ -25,7 +25,7 @@ export type HairShearDirective = {
   side: "l" | "r";
   axis: "x" | "y" | "z";
   vertices: readonly [number, number];
-  factor: number;
+  factors: readonly [number, number];
 };
 
 export type MakeHumanHairProxy = {
@@ -102,15 +102,20 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     else if (key === "obj_file") result.objectFile = values.join(" ");
     else if (key === "material" || key === "material_file") result.materialFile = values.join(" ");
     else if (/^[xyz]_scale$/.test(key)) {
-      if (values.length !== 4) throw new Error(`Malformed ${key} at line ${index + 1}`);
+      if (values.length !== 3) throw new Error(`Malformed ${key} at line ${index + 1}`);
       const [a, b, factor] = [Number(values[0]), Number(values[1]), Number(values[2])];
       if (![a, b].every((v) => Number.isInteger(v) && v >= 0)) throw new Error(`Invalid ${key} vertex pair`);
       result.scale.push({ axis: key[0] as "x" | "y" | "z", vertices: [a, b], factor: finite(factor, key) });
     } else if (/^[lr]_[xyz]_shear$/.test(key)) {
-      if (values.length !== 3) throw new Error(`Malformed ${key} at line ${index + 1}`);
-      const [a, b, factor] = [Number(values[0]), Number(values[1]), Number(values[2])];
+      if (values.length !== 4) throw new Error(`Malformed ${key} at line ${index + 1}`);
+      const [a, b, factorA, factorB] = values.map(Number);
       if (![a, b].every((v) => Number.isInteger(v) && v >= 0)) throw new Error(`Invalid ${key} vertex pair`);
-      result.shear.push({ side: key[0] as "l" | "r", axis: key[2] as "x" | "y" | "z", vertices: [a, b], factor: finite(factor, key) });
+      result.shear.push({
+        side: key[0] as "l" | "r",
+        axis: key[2] as "x" | "y" | "z",
+        vertices: [a, b],
+        factors: [finite(factorA!, key), finite(factorB!, key)],
+      });
     } else {
       result.metadata[key] = values.join(" ");
     }
