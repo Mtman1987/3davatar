@@ -1,7 +1,9 @@
+import * as THREE from "three";
 import type { Weights } from "@/lib/avatar/arkit";
 
 type Category = { categoryName?: string; score?: number };
-type Result = { faceBlendshapes?: Array<{ categories?: Category[] }> };
+type Result = { faceBlendshapes?: Array<{ categories?: Category[] }>; facialTransformationMatrixes?: Array<{ data?: number[] }> };
+export type LiveTrackingSample = { weights: Weights | null; headRotation: { x: number; y: number; z: number } | null };
 type Landmarker = {
   detectForVideo: (video: HTMLVideoElement, timestamp: number) => Result;
   close?: () => void;
@@ -19,6 +21,8 @@ export class LiveFaceTracker {
   private lastRun = 0;
   private weights: Weights | null = null;
   private smoothed: Record<string, number> = {};
+  private neutralFaceRotation: THREE.Quaternion | null = null;
+  private headRotation: { x: number; y: number; z: number } | null = null;
   private stopped = false;
 
   async start() {
@@ -49,7 +53,7 @@ export class LiveFaceTracker {
       runningMode: "VIDEO" as const,
       numFaces: 1,
       outputFaceBlendshapes: true,
-      outputFacialTransformationMatrixes: false,
+      outputFacialTransformationMatrixes: true,
       minFaceDetectionConfidence: 0.55,
       minFacePresenceConfidence: 0.55,
       minTrackingConfidence: 0.55,
@@ -84,7 +88,7 @@ export class LiveFaceTracker {
       this.video = null;
     }
     this.weights = null;
-    this.smoothed = {};
+    this.smoothed = {};\n    this.neutralFaceRotation = null;\n    this.headRotation = null;
   }
 
   private loop = () => {
@@ -104,7 +108,7 @@ export class LiveFaceTracker {
         this.lastVideoTime = video.currentTime;
         try {
           const result = landmarker.detectForVideo(video, now);
-          const categories = result.faceBlendshapes?.[0]?.categories;
+          const matrixData = result.facialTransformationMatrixes?.[0]?.data;\n          if (matrixData?.length === 16) {\n            const matrix = new THREE.Matrix4().fromArray(matrixData);\n            const currentRotation = new THREE.Quaternion();\n            matrix.decompose(new THREE.Vector3(), currentRotation, new THREE.Vector3());\n            if (!this.neutralFaceRotation) this.neutralFaceRotation = currentRotation.clone();\n            const relative = this.neutralFaceRotation.clone().invert().multiply(currentRotation).normalize();\n            const euler = new THREE.Euler().setFromQuaternion(relative, "YXZ");\n            const nextRotation = { x: euler.x, y: euler.y, z: euler.z };\n            const previousRotation = this.headRotation ?? nextRotation;\n            const alpha = 0.28;\n            this.headRotation = {\n              x: previousRotation.x + (nextRotation.x - previousRotation.x) * alpha,\n              y: previousRotation.y + (nextRotation.y - previousRotation.y) * alpha,\n              z: previousRotation.z + (nextRotation.z - previousRotation.z) * alpha,\n            };\n          }\n          const categories = result.faceBlendshapes?.[0]?.categories;
           if (categories?.length) {
             const next: Weights = {};
             for (const item of categories) {
