@@ -64,7 +64,6 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     metadata: {},
   };
   let readingFit = false;
-  let declaredVertexCount: number | null = null;
 
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
     const line = rawLine.trim();
@@ -91,9 +90,10 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     }
 
     if (key === "verts") {
-      declaredVertexCount = Number(values[0]);
-      if (!Number.isInteger(declaredVertexCount) || declaredVertexCount! < 0) {
-        throw new Error(`Invalid verts declaration at line ${index + 1}`);
+      // In MakeHuman proxies, `verts 0` is the start marker for the fitting
+      // map, not a declaration that the map contains zero records.
+      if (values.length !== 1 || !Number.isInteger(Number(values[0])) || Number(values[0]) < 0) {
+        throw new Error(`Invalid verts marker at line ${index + 1}`);
       }
       readingFit = true;
       continue;
@@ -116,9 +116,6 @@ export function parseMakeHumanHairProxy(text: string): MakeHumanHairProxy {
     }
   }
 
-  if (declaredVertexCount !== null && result.fitRecords.length !== declaredVertexCount) {
-    throw new Error(`Proxy declares ${declaredVertexCount} fitted vertices but contains ${result.fitRecords.length} records`);
-  }
   if (!result.baseMesh) throw new Error("MakeHuman hair proxy is missing basemesh");
   return result;
 }
