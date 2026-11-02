@@ -1,8 +1,14 @@
 # START HERE — current repair branch and remaining acceptance
 
+## GitHub update — 2026-11-02
+
+Authentication is resolved. Branch `fix/contour-eyes-and-stable-motion` has been pushed to `Mtman1987/3davatar`. Pull request **#44** is open: https://github.com/Mtman1987/3davatar/pull/44. Implementation commit remains `cee2a6e`; `4673e84` recorded the earlier blocker, which is now historical. This handoff update is committed on the same PR branch. Main has NOT been merged or changed by this repair.
+
+Re-ran the 14 TypeScript eye/morph tests, 12 Python service tests and typecheck after authentication: all pass. Final production build previously passed on unchanged implementation. GitHub CI must be checked on the latest PR head; local passing tests are not a claim that remote CI has completed. Do not merge until remaining real-head acceptance below is addressed. The token is stored outside the repository and is not included in patches, commits or archives.
+
 ## Latest continuation — 2026-10-31
 
-This section supersedes the archived candidate-only status below. The original SHA-256-verified patch has now been applied, with additional reviewed source changes, on branch `fix/contour-eyes-and-stable-motion`, based on main `be4c37ba950361488c5e4c2a67390d96e5bdbd96`. Implementation commit: `cee2a6e`. Main and protected model files are unchanged. Remote push FAILED: `fatal: could not read Username for 'https://github.com': No such device or address`. No PR was opened. The downloadable git patch/source archive preserves the work; authenticate GitHub and push this branch before claiming the remote repository is updated.
+This section supersedes the archived candidate-only status below. The original SHA-256-verified patch has now been applied, with additional reviewed source changes, on branch `fix/contour-eyes-and-stable-motion`, based on main `be4c37ba950361488c5e4c2a67390d96e5bdbd96`. Implementation commit: `cee2a6e`. Main and protected model files are unchanged. The earlier authentication failure has been resolved; see PR #44 above. The downloadable git patch/source archive also preserves the work.
 
 ### User clarification and actual supplied files
 
@@ -38,7 +44,7 @@ They supplied `first-face.glb`, a turntable JPG, overlay JPG and skin PNG privat
 
 ### Next agent
 
-Read this section, inspect the repair branch, and run the targeted gates. Verify remote push/PR before claiming GitHub was updated. Once the user runs the updated source, use **Save → Download head repair package** to obtain the real native head from its service without manual file hunting. If unavailable, the UI now reports the actual service error; verify the service environment and on-disk job output rather than inventing a storage website.
+Read this section, inspect PR #44 and its latest CI results, and run the targeted gates. Once the user runs the updated source, use **Save → Download head repair package** to obtain the real native head from its service without manual file hunting. If unavailable, the UI now reports the actual service error; verify the service environment and on-disk job output rather than inventing a storage website.
 
 Still open: actual subject morph amplitudes/channel semantics; saved fit; male/female and both Z conventions; strong morph/aperture alignment; head/body/jaw/audio/tracking combinations; complete GLB eye/aperture and animation export/reimport parity; face-perimeter/chin seams; production-browser verification. Do not claim the user's blendshapes or all movements fixed until the real native package passes acceptance.
 
