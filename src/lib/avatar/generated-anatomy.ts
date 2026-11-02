@@ -42,7 +42,7 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   const lidDepth = contour.reduce((sum, p) => sum + p.z, 0) / contour.length;
   const eyeball = new THREE.Mesh(
     new THREE.SphereGeometry(1, 32, 24),
-    new THREE.MeshStandardMaterial({ color: 0xf4eee5, roughness: 0.24 }),
+    new THREE.MeshStandardMaterial({ color: 0xe2d7c9, roughness: 0.34 }),
   );
   eyeball.name = "AvatarAceEyeball_" + side;
   eyeball.position.set(center.x, center.y, lidDepth - frontSign * radius * 0.24);
@@ -101,7 +101,9 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   for (const p of [...upperArc].reverse()) upperShape.lineTo(p.x, p.y);
   upperShape.closePath();
   const upperLidMaterial = skin.clone() as THREE.MeshStandardMaterial;
-  upperLidMaterial.color.multiplyScalar(0.84);
+  // Match eyelid albedo to the face skin. Brow/socket geometry and scene lighting
+  // provide natural shadow; a separate tint can read as a pale/dark mask.
+  upperLidMaterial.color.copy((skin as THREE.MeshStandardMaterial).color);
   upperLidMaterial.roughness = 0.92;
   const upperLid = new THREE.Mesh(new THREE.ShapeGeometry(upperShape, 24), upperLidMaterial);
   upperLid.name = "AvatarAceUpperBlinkLid_" + side;
@@ -117,7 +119,8 @@ function makeEye(points: [number, number, number][], centerIndex: number, ring: 
   lowerShape.lineTo(right.x, center.y);
   lowerShape.closePath();
   const lowerLidMaterial = skin.clone() as THREE.MeshStandardMaterial;
-  lowerLidMaterial.color.multiplyScalar(0.92);
+  // Match the surrounding skin exactly; let lighting create the subtle lid contour.
+  lowerLidMaterial.color.copy((skin as THREE.MeshStandardMaterial).color);
   lowerLidMaterial.roughness = 0.9;
   const lowerLid = new THREE.Mesh(new THREE.ShapeGeometry(lowerShape, 16), lowerLidMaterial);
   lowerLid.name = "AvatarAceLowerBlinkLid_" + side;
@@ -315,9 +318,12 @@ export function animateGeneratedFacialAnatomy(root: THREE.Object3D, weights: Rec
     // Rotate the fitted eyeball/iris group itself, so gaze works on the
     // generated anatomy even when the source head has no eye-look morphs.
     const lookX = THREE.MathUtils.clamp((weights["eyeLookDown" + side] ?? 0) - (weights["eyeLookUp" + side] ?? 0), -1, 1);
-    const lookY = THREE.MathUtils.clamp((weights["eyeLookIn" + side] ?? 0) - (weights["eyeLookOut" + side] ?? 0), -1, 1);
+    const rawLookY = THREE.MathUtils.clamp((weights["eyeLookIn" + side] ?? 0) - (weights["eyeLookOut" + side] ?? 0), -1, 1);
+    // ARKit's In/Out labels are anatomical: the right eye's horizontal axis is
+    // mirrored relative to the left. Convert both to one shared world gaze.
+    const horizontalSign = index === 0 ? 1 : -1;
     eye.rotation.x = THREE.MathUtils.damp(eye.rotation.x, lookX * 0.16, 12, Math.max(0, delta));
-    eye.rotation.y = THREE.MathUtils.damp(eye.rotation.y, lookY * 0.2, 12, Math.max(0, delta));
+    eye.rotation.y = THREE.MathUtils.damp(eye.rotation.y, rawLookY * horizontalSign * 0.2, 12, Math.max(0, delta));
     const upperLid = eye.userData.upperBlinkLid as THREE.Mesh | undefined;
     const lowerLid = eye.userData.lowerBlinkLid as THREE.Mesh | undefined;
     if (!upperLid || !lowerLid) continue;
