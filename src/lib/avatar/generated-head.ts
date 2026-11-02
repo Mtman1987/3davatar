@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { getGeneratedHeadAsset } from "@/lib/avatar/reconstruction";
 import { ARKIT_BLENDSHAPE_NAMES } from "@/lib/avatar/arkit";
 import { buildGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
+import { matchFittedLidMaterials, openFittedEyeApertures } from "./generated-eye.ts";
 import { applyAvatarSkinSurface } from "@/lib/avatar/skin-material";
 
 export type GeneratedHeadManifest = {
@@ -72,7 +73,7 @@ export function applyGeneratedHeadSkinTone(root: THREE.Object3D, targetTone: THR
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const source of materials) {
       if (!(source instanceof THREE.MeshStandardMaterial)) continue;
-      if (isHeadSurface && source.map) {
+      if (source.map) {
         source.color.set(0xffffff);
       } else if (targetTone) {
         source.color.copy(targetTone);
@@ -430,6 +431,8 @@ export async function loadGeneratedHeadBundle(manifestUrl: string): Promise<THRE
   const anatomy = buildGeneratedFacialAnatomy(facialLandmarks);
   if (anatomy) {
     anatomy.name = "AvatarAceSubjectFittedAnatomy";
+    matchFittedLidMaterials(anatomy, built.geometry, material);
+    openFittedEyeApertures(anatomy, material);
     // Facial landmarks are authored in neutral-head mesh coordinates. Keep
     // the fitted eyes and lids in that exact world-space position at bind,
     // but parent them to the generated rig's head bone so head pose rotates

@@ -7,12 +7,14 @@ import { ARKIT_BLENDSHAPE_NAMES, PRESETS, type Weights } from "@/lib/avatar/arki
 import { getFaceCache } from "@/lib/avatar/face-cache";
 import { applyGeneratedHeadSkinTone, loadGeneratedHeadBundle } from "@/lib/avatar/generated-head";
 import { animateGeneratedFacialAnatomy } from "@/lib/avatar/generated-anatomy";
+import { applyGeneratedHeadPose } from "@/lib/avatar/generated-motion";
+import { applyMorphs, inspectMorphs } from "@/lib/avatar/morph-driver";
 import { applyAvatarSkinSurface } from "@/lib/avatar/skin-material";
 import type { LiveTrackingSample } from "@/lib/avatar/live-face-tracker";
 import { bodyUrl, SKINS, type BodyAssetId, type FaceChoice, type HairId, type OutfitId, type Preset, type SkinId } from "@/lib/avatar/constants";
 
 export type ViewportHandle = { snapshot: () => string; exportGlb: () => Promise<Blob> };
-export type ModelInfo = { morphNames: string[]; animationNames: string[] };
+export type ModelInfo = { morphNames: string[]; animationNames: string[]; warning?: string };
 type Props = {
   bodyAsset: BodyAssetId; modelUrl: string | null; modelName?: string | null; generatedHeadUrl?: string | null;
   outfit: OutfitId; hair: HairId; skin: SkinId; faceChoice: FaceChoice; preset: Preset;
@@ -37,7 +39,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
 
   useImperativeHandle(ref, () => ({
     snapshot: () => { try { return rendererRef.current?.domElement.toDataURL("image/jpeg", 0.72) ?? ""; } catch { return ""; } },
-    exportGlb: () => exportGroup(modelRef.current?.root ?? null),
+    exportGlb: () => exportGroup(modelRef.current?.root ?? null, modelRef.current?.clips ?? []),
   }));
 
   useEffect(() => {
@@ -129,8 +131,8 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       // these non-speech expressions when explicitly enabled; audio always
       // owns speech articulation so a camera cannot cancel the spoken mouth.
       const speechActivity = Math.max(sound?.jawOpen ?? 0, sound?.mouthLowerDownLeft ?? 0, sound?.mouthLowerDownRight ?? 0);
-      const cohostWeights = tracking ? {} : autonomousCohostWeights(cohostTime, clamp((speechActivity - 0.035) * 2.4, 0, 1));
-      const allWeights: Record<string,number> = {...presetWeights,...cohostWeights,...(tracking?.weights ?? {}),...(sound ?? {}),...(current.manualMorphs ?? {})};
+      const cohostWeights = tracking?.weights || tracking?.headRotation || current.preset !== "captured" ? {} : autonomousCohostWeights(cohostTime, clamp((speechActivity - 0.035) * 2.4, 0, 1));
+      const allWeights: Record<string,number> = {...cohostWeights,...(tracking?.weights ?? {}),...(sound ?? {}),...presetWeights,...(current.manualMorphs ?? {})};
       if (loaded) applyMorphs(loaded.root,allWeights,current.expression);
       // The reconstructed head is the authoritative ARKit face rig. Drive it
       // explicitly as well as the body root so expressions never depend on
@@ -140,12 +142,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
          applyMorphs(generatedHead,allWeights,current.expression);
          const headBone = generatedHead.getObjectByName("head") as THREE.Bone | null;
          if (headBone) {
-           const base = headBone.userData.avatarAceBaseHeadQuaternion as THREE.Quaternion | undefined;
-           if (!base) headBone.userData.avatarAceBaseHeadQuaternion = headBone.quaternion.clone();
-           const rest = headBone.userData.avatarAceBaseHeadQuaternion as THREE.Quaternion;
-           const pose = tracking?.headRotation;
-           const offset = pose ? new THREE.Quaternion().setFromEuler(new THREE.Euler(pose.x, pose.y, pose.z, "YXZ")) : new THREE.Quaternion();
-           headBone.quaternion.copy(rest).multiply(offset);
+           applyGeneratedHeadPose(headBone, tracking?.headRotation, delta);
          }
          const anatomy = generatedHead.getObjectByName("AvatarAceSubjectFittedAnatomy");
          const jawBone = generatedHead.getObjectByName("jaw") as THREE.Bone | null;
@@ -210,7 +207,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       modelRef.current={root,clips,mixer};scene.add(root);
       const morphNames=new Set<string>();
       root.traverse((obj)=>{const mesh=obj as THREE.Mesh; if(mesh.isMesh && mesh.morphTargetDictionary)Object.keys(mesh.morphTargetDictionary).forEach(n=>morphNames.add(n));});
-      propsRef.current.onModelInfo?.({morphNames:[...morphNames].sort(),animationNames:clips.map(c=>c.name || "Unnamed animation")});
+      propsRef.current.onModelInfo?.({morphNames:[...morphNames].sort(),animationNames:clips.map(c=>c.name || "Unnamed animation"),warning: props.generatedHeadUrl && !props.modelUrl ? undefined : inspectMorphs(root).warning});
       setBooted(n=>n+1);
     },(event)=>{propsRef.current.onProgress?.(event.loaded,event.total);},(error)=>{
       if(cancelled)return;
@@ -285,6 +282,7 @@ export const Viewport = forwardRef<ViewportHandle, Props>(function Viewport(prop
       propsRef.current.onModelInfo?.({
         morphNames: [...morphNames].sort(),
         animationNames: loaded.clips.map((clip) => clip.name || "Unnamed animation"),
+        warning: inspectMorphs(generatedHead).warning,
       });
     }).catch((error: unknown) => {
       if (cancelled) return;
@@ -819,32 +817,6 @@ function disposeFaceMesh(mesh: THREE.Mesh) {
   material.dispose();
 }
 
-function applyMorphs(root: THREE.Object3D, weights: Record<string,number>, expression: number) {
-  // Older or partially restored saves may not contain a valid expression
-  // strength. Never let an undefined/NaN value poison every live morph weight.
-  const strength = Number.isFinite(expression) ? expression : 1;
-  root.traverse((obj)=>{
-    const mesh=obj as THREE.Mesh;
-    if(!mesh.isMesh||!mesh.morphTargetDictionary||!mesh.morphTargetInfluences)return;
-    const isPhotoFace = mesh.name === "AvatarAcePhotoFace";
-    const baseline = isPhotoFace ? mesh.userData.avatarPhotoFaceBaseline as number[] | undefined : undefined;
-    if (isPhotoFace) {
-      // Restore the captured photo expression every frame before applying live drivers.
-      // This prevents sparse Audio2Face/tracking frames from leaving stale jaw/blink weights.
-      for (const name of ARKIT_BLENDSHAPE_NAMES) {
-        const index = mesh.morphTargetDictionary[name];
-        if (index !== undefined) {
-          const base = baseline?.[index] ?? 0;
-          mesh.morphTargetInfluences[index] = clamp(base * strength, 0, 1);
-        }
-      }
-    }
-    for(const [name,value] of Object.entries(weights)){
-      const index=mesh.morphTargetDictionary[name];
-      if(index !== undefined) mesh.morphTargetInfluences[index]=clamp(value*strength,0,1);
-    }
-  });
-}
 function disposeModel(root: THREE.Object3D) {
   root.traverse((obj)=>{
     const mesh=obj as THREE.Mesh;if(!mesh.isMesh)return;
@@ -853,11 +825,11 @@ function disposeModel(root: THREE.Object3D) {
       for(const texture of [m.map,m.normalMap,m.roughnessMap,m.metalnessMap,m.emissiveMap])texture?.dispose();m.dispose();}
   });
 }
-function exportGroup(root: THREE.Object3D | null): Promise<Blob> {
+function exportGroup(root: THREE.Object3D | null, animations: THREE.AnimationClip[] = []): Promise<Blob> {
   if(!root)return Promise.reject(new Error("Nothing loaded to export"));
   const exporter=new GLTFExporter();
   return new Promise((resolve,reject)=>exporter.parse(root,(result)=>{
     if(result instanceof ArrayBuffer)resolve(new Blob([result],{type:"model/gltf-binary"}));
     else reject(new Error("GLB export returned a non-binary result"));
-  },(error)=>reject(error instanceof Error?error:new Error("GLB export failed")),{binary:true}));
+  },(error)=>reject(error instanceof Error?error:new Error("GLB export failed")),{binary:true,animations}));
 }

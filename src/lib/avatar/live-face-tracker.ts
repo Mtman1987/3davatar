@@ -24,6 +24,7 @@ export class LiveFaceTracker {
   private neutralFaceRotation: THREE.Quaternion | null = null;
   private headRotation: { x: number; y: number; z: number } | null = null;
   private stopped = false;
+  private lastFaceTime = 0;
 
   async start() {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access is not supported in this browser.");
@@ -71,6 +72,9 @@ export class LiveFaceTracker {
   }
 
   sample(): LiveTrackingSample {
+    if (!this.lastFaceTime || performance.now() - this.lastFaceTime > 300) {
+      return { weights: null, headRotation: null };
+    }
     return { weights: this.weights, headRotation: this.headRotation };
   }
 
@@ -91,6 +95,9 @@ export class LiveFaceTracker {
     this.smoothed = {};
     this.neutralFaceRotation = null;
     this.headRotation = null;
+    this.lastFaceTime = 0;
+    this.lastRun = 0;
+    this.lastVideoTime = -1;
   }
 
   private loop = () => {
@@ -111,7 +118,7 @@ export class LiveFaceTracker {
         try {
           const result = landmarker.detectForVideo(video, now);
           const matrixData = result.facialTransformationMatrixes?.[0]?.data;
-          if (matrixData?.length === 16) {
+          if (matrixData?.length === 16 && Array.from(matrixData).every(Number.isFinite)) {
             // MediaPipe serializes this 4x4 transform as row-major matrix rows.
             // THREE.Matrix4.fromArray() expects column-major elements, so using
             // it directly transposes the rotation and scrambles yaw, pitch and roll.
@@ -137,9 +144,10 @@ export class LiveFaceTracker {
           }
           const categories = result.faceBlendshapes?.[0]?.categories;
           if (categories?.length) {
+            this.lastFaceTime = now;
             const next: Weights = {};
             for (const item of categories) {
-              if (!item.categoryName || typeof item.score !== "number") continue;
+              if (!item.categoryName || typeof item.score !== "number" || !Number.isFinite(item.score)) continue;
               const value = Math.max(0, Math.min(1, item.score));
               const previous = this.smoothed[item.categoryName] ?? value;
               const smooth = previous + (value - previous) * 0.42;
@@ -149,6 +157,8 @@ export class LiveFaceTracker {
             this.weights = next;
           } else {
             this.weights = null;
+            this.headRotation = null;
+            this.lastFaceTime = 0;
           }
         } catch {
           // A dropped camera frame should not stop the render or tracking loop.
